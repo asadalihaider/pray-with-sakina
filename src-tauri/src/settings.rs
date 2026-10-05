@@ -129,6 +129,9 @@ pub struct Settings {
     pub jumuah: Option<FirstNudge>,
     pub bedtime_hour: u32,
     pub bedtime_minute: u32,
+    /// On by default. A reminder app that is not running reminds nobody,
+    /// and the one moment a user is certain to miss is the one where they
+    /// restarted their Mac and forgot the app existed.
     pub launch_at_login: bool,
     pub theme: Theme,
     pub onboarded: bool,
@@ -149,7 +152,7 @@ impl Default for Settings {
             jumuah: None,
             bedtime_hour: 23,
             bedtime_minute: 30,
-            launch_at_login: false,
+            launch_at_login: true,
             theme: Theme::System,
             onboarded: false,
         }
@@ -340,6 +343,24 @@ mod tests {
         assert_eq!(back.location_name, "Lahore");
         assert_eq!(back.method, CalcMethod::Karachi);
         assert_eq!(back.bedtime_hour, 23);
+    }
+
+    #[test]
+    fn a_fresh_install_launches_at_login() {
+        // A reminder app that is not running reminds nobody.
+        let log = PrayerLog::in_memory().unwrap();
+        assert!(load(&log).launch_at_login);
+    }
+
+    #[test]
+    fn turning_launch_at_login_off_is_respected() {
+        // The default must not override a user who deliberately turned it
+        // off — a default is for the first run, not every run.
+        let log = PrayerLog::in_memory().unwrap();
+        let mut settings = Settings::default();
+        settings.launch_at_login = false;
+        save(&log, &settings);
+        assert!(!load(&log).launch_at_login);
     }
 
     #[test]

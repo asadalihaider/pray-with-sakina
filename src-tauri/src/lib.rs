@@ -738,10 +738,19 @@ pub fn run() {
 
             app.manage(AppState::new(log));
             let state = app.state::<AppState>();
-            let (startup_theme, onboarded) = {
+            let (startup_theme, onboarded, launch_at_login) = {
                 let settings = state.settings.read().unwrap();
-                (settings.theme, settings.onboarded)
+                (settings.theme, settings.onboarded, settings.launch_at_login)
             };
+
+            // Applied on every launch, not only when the setting is changed.
+            // It used to be applied only from `save_settings`, which meant a
+            // fresh install showed the switch on and registered nothing —
+            // the app would not actually start at login until the user
+            // opened Settings and toggled it. Re-applying also repoints the
+            // launch agent after the app is moved or reinstalled, since the
+            // agent holds an absolute path.
+            apply_autostart(&app.handle().clone(), launch_at_login);
 
             // A menu bar app, not a windowed one: no Dock icon, no app switcher.
             #[cfg(target_os = "macos")]
