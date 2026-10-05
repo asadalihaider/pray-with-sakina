@@ -36,21 +36,28 @@ export default function CitySearch({
   const [searching, setSearching] = useState(false);
   const [locating, setLocating] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  /// Named rather than assumed. Finding a location is the one thing on this
+  /// screen that takes a visible moment and then changes something the user
+  /// cannot see happening, so it says so when it is done.
+  const [fetched, setFetched] = useState<string | null>(null);
 
   const useMyLocation = async () => {
     setLocating(true);
     onBusy?.(true);
     setProblem(null);
+    setFetched(null);
     try {
       const found = await invoke<Detected>("detect_location");
+      // Apple's geocoder names the coordinates it already holds; if it
+      // cannot, a generic label beats blocking on a name.
+      const name = found.name ?? "Current location";
       onPick({
-        // Apple's geocoder names the coordinates it already holds; if it
-        // cannot, a generic label beats blocking on a name.
-        name: found.name ?? "Current location",
+        name,
         latitude: found.latitude,
         longitude: found.longitude,
         timezone: found.timezone,
       });
+      setFetched(name);
     } catch (error) {
       setProblem(String(error));
     } finally {
@@ -90,7 +97,10 @@ export default function CitySearch({
           className="search"
           placeholder="Search a city"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+          setQuery(event.target.value);
+          setFetched(null);
+        }}
           onKeyDown={(event) => event.key === "Enter" && search()}
         />
         <button className="small" onClick={search} disabled={searching}>
@@ -103,6 +113,9 @@ export default function CitySearch({
         </button>
       </div>
       {problem && <div className="row-note">{problem}</div>}
+      {fetched && !problem && (
+        <div className="row-note is-good">Current location found — {fetched}</div>
+      )}
       {places !== null && (
         <div className="places">
           {places.length === 0 && <div className="row-note">No matches.</div>}

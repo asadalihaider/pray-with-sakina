@@ -752,6 +752,12 @@ body {
   color: var(--text-faint);
 }
 
+/* A confirmation, not a warning: the same slot as an error message but
+   plainly a success, so the two are never confused at a glance. */
+.row-note.is-good {
+  color: var(--prayed);
+}
+
 .row-note {
   font-size: 11px;
   color: var(--text-faint);
