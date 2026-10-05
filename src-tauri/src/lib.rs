@@ -1,4 +1,8 @@
 mod engine;
+/// macOS only, and declared that way: it is built on Apple's
+/// UserNotifications framework, which does not exist elsewhere.
+#[cfg(target_os = "macos")]
+mod notifier;
 mod icon;
 mod location;
 mod scheduler;
@@ -131,6 +135,87 @@ fn save_settings(
     *state.settings.write().unwrap() = settings.clone();
     refresh_tray_title(&app);
     Ok(settings)
+}
+
+/// Posts a sample reminder, so the user can see what one looks like before
+/// a prayer window ever opens.
+///
+/// Deliberately carries no button. A real reminder has a "Prayed" button
+/// that writes to the log, and a reminder sent for a prayer that is not due
+/// must never be able to record one.
+///
+/// Asynchronous on purpose. Every call into the notification centre waits on
+/// a completion handler, and a handler cannot run while the thread it would
+/// answer on is the one blocked waiting for it. As a synchronous command
+/// this deadlocked for its full five-second timeout and then reported that
+/// macOS had not decided — which looked exactly like a button that does
+/// nothing.
+#[tauri::command]
+async fn send_test_reminder() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        return tauri::async_runtime::spawn_blocking(|| {
+        // Asking first, because a reminder cannot be shown before the user
+        // has agreed to see any. This is the prompt on a fresh install, and
+        // macOS answers it from its own records every time after.
+            match notifier::request() {
+                notifier::Permission::Granted => {}
+                notifier::Permission::Denied => {
+                    return Err(
+                        "macOS is blocking notifications for Sakina. Turn them back on in \
+                         notification settings and try again."
+                            .into(),
+                    )
+                }
+                other => return Err(format!("macOS has not decided yet ({other:?}).")),
+            }
+            notifier::deliver(
+                "Sakina · test reminder",
+                "A real reminder looks like this, and repeats until you log the prayer.",
+            )
+        })
+        .await
+        .unwrap_or_else(|_| Err("The reminder could not be sent.".into()));
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("Reminders are only built for macOS so far.".into())
+}
+
+/// What macOS currently allows, so the UI can say something true rather
+/// than guessing.
+#[tauri::command]
+async fn reminder_permission() -> String {
+    #[cfg(target_os = "macos")]
+    return tauri::async_runtime::spawn_blocking(|| format!("{:?}", notifier::status()))
+        .await
+        .unwrap_or_else(|_| "Unknown".to_string());
+    #[cfg(not(target_os = "macos"))]
+    "Unknown".to_string()
+}
+
+/// Opens Sakina's own page in System Settings → Notifications.
+///
+/// Whether a notification persists is the user's setting, not the app's.
+/// There is no API to choose it, and the Info.plist key that used to supply
+/// a default is ignored on current macOS — so the honest move is to put the
+/// switch one click away rather than pretend to flip it.
+///
+/// The `id` parameter is what lands on *this app's* page. Without it the
+/// pane opens at the top of a long alphabetical list and the user has to go
+/// hunting, which is most of the reason they would give up.
+#[tauri::command]
+fn open_notification_settings(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(format!(
+                "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={}",
+                app.config().identifier
+            ))
+            .spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
 /// Fires a reminder on demand, so the notification path can be checked
@@ -392,12 +477,12 @@ fn float_over_every_space(window: &WebviewWindow) {
     ns_window.setLevel(NSPopUpMenuWindowLevel);
 }
 
-/// Fires the system notification for a due nudge. Clicking it opens the
-/// popover, where the prayer is actually logged.
+/// Fires the system notification for a due nudge.
 ///
-/// `send_notification` blocks until the user acts on or dismisses the
-/// notification, so it runs on its own thread rather than stalling the
-/// scheduler tick.
+/// The delegate installed at startup is what makes this appear at all —
+/// macOS will not present a notification while the app that sent it is
+/// frontmost unless something says to, and it is what carries the button
+/// press back here.
 #[cfg(target_os = "macos")]
 fn notify(app: &AppHandle, due: &scheduler::DueNudge) {
     let title = format!("{} · {} left", due.label, format_remaining(due.remaining_ms));
@@ -406,63 +491,16 @@ fn notify(app: &AppHandle, due: &scheduler::DueNudge) {
     } else {
         "Have you prayed?"
     };
-    // NSUserNotificationCenter silently withholds the banner when the app
-    // delivering it is frontmost, and mac-notification-sys does not
-    // implement shouldPresentNotification to override that. Stepping out of
-    // the way first is what makes the reminder actually appear rather than
-    // landing straight in Notification Center.
-    resign_active(app);
-
-    let app = app.clone();
-    let prayer = due.prayer;
-
-    std::thread::spawn(move || {
-        use mac_notification_sys::{MainButton, Notification, NotificationResponse};
-
-        // Without `wait_for_click` the call is fire-and-forget and always
-        // reports `None`, so neither the click nor the button reaches us.
-        let mut options = Notification::new();
-        options.wait_for_click(true);
-        options.main_button(MainButton::SingleAction("Prayed"));
-
-        match mac_notification_sys::send_notification(&title, None, body, Some(&options)) {
-            // Logged straight from the notification: the quickest path is
-            // not opening the app at all.
-            Ok(NotificationResponse::ActionButton(_)) => {
-                let now = Utc::now();
-                let state = app.state::<AppState>();
-                let date = today::display_date(now, &state.settings.read().unwrap());
-                if let Ok(date) = date {
-                    state.log.set(date, prayer, LoggedStatus::Prayed, now);
-                }
-                refresh_tray_title(&app);
-            }
-            Ok(NotificationResponse::Click) => {
-                let handle = app.clone();
-                let _ = app.run_on_main_thread(move || show_popover(&handle));
-            }
-            _ => {}
-        }
-    });
+    if let Err(error) = notifier::deliver_reminder(store::prayer_name(due.prayer), &title, body) {
+        // Nothing to show the user: there is no window open when a reminder
+        // fires. Swallowing it is still wrong, so it goes to the log.
+        eprintln!("sakina: a reminder could not be shown: {error}");
+        let _ = app;
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
 fn notify(_app: &AppHandle, _due: &scheduler::DueNudge) {}
-
-#[cfg(target_os = "macos")]
-fn resign_active(app: &AppHandle) {
-    let _ = app.run_on_main_thread(|| {
-        use objc2_app_kit::NSApplication;
-
-        let Some(marker) = objc2::MainThreadMarker::new() else {
-            return;
-        };
-        let ns_app = NSApplication::sharedApplication(marker);
-        if ns_app.isActive() {
-            ns_app.deactivate();
-        }
-    });
-}
 
 /// Development-only: fires a reminder immediately, since a real one can be
 /// most of an hour away.
@@ -723,6 +761,9 @@ pub fn run() {
             get_settings,
             save_settings,
             preview_reminder,
+            send_test_reminder,
+            reminder_permission,
+            open_notification_settings,
             log_mulk,
             detect_location
         ])
@@ -762,12 +803,37 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-                // Only takes effect for a bundled .app; an unbundled `tauri
-                // dev` binary is not registered with Launch Services, so
-                // notifications there are attributed elsewhere.
-                let _ = mac_notification_sys::set_application(
-                    &app.config().identifier,
-                );
+
+                // The delegate has to be in place before any notification
+                // arrives, so it goes in at startup rather than on first
+                // use. It is what presents a reminder while the panel is
+                // open, and what carries the button press back.
+                let acting = app.handle().clone();
+                notifier::install(move |act| {
+                    let app = acting.clone();
+                    match act {
+                        notifier::Act::Prayed(prayer) => {
+                            let Some(prayer) = store::prayer_from(&prayer) else {
+                                return;
+                            };
+                            let now = Utc::now();
+                            let state = app.state::<AppState>();
+                            let date = today::display_date(
+                                now,
+                                &state.settings.read().unwrap(),
+                            );
+                            if let Ok(date) = date {
+                                state.log.set(date, prayer, LoggedStatus::Prayed, now);
+                            }
+                            refresh_tray_title(&app);
+                        }
+                        notifier::Act::Opened => {
+                            let opener = app.clone();
+                            let _ = app
+                                .run_on_main_thread(move || show_popover(&opener));
+                        }
+                    }
+                });
             }
 
             if let Some(window) = app.get_webview_window("main") {
