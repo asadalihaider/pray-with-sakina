@@ -1,0 +1,1117 @@
+:root {
+  --fajr: #6b63d6;
+  --zuhr: #2e8fd9;
+  --asr: #d99534;
+  --maghrib: #df6f5c;
+  --isha: #4a4c99;
+
+  --text: #14161a;
+  --text-dim: rgba(20, 22, 26, 0.55);
+  --text-faint: rgba(20, 22, 26, 0.38);
+  --hairline: rgba(20, 22, 26, 0.08);
+  --surface: rgba(20, 22, 26, 0.05);
+  /* A veil over the vibrancy: the frosted material alone leaves text
+     competing with whatever is behind the window. */
+  --veil: rgba(255, 255, 255, 0.55);
+  --unlogged-fill: rgba(20, 22, 26, 0.13);
+  --upcoming-fill: rgba(20, 22, 26, 0.04);
+  --prayed: #3b9c6a;
+  --missed: #cf4a3c;
+}
+
+/* Dark values live in one block, applied either by system preference (unless
+   the user has forced light) or by an explicit choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fajr: #8f86f0;
+    --zuhr: #4fa8ec;
+    --asr: #e8ac55;
+    --maghrib: #f0897a;
+    --isha: #8083d8;
+
+    --text: #f2f4f7;
+    --text-dim: rgba(242, 244, 247, 0.58);
+    --text-faint: rgba(242, 244, 247, 0.36);
+    --hairline: rgba(255, 255, 255, 0.09);
+    --surface: rgba(255, 255, 255, 0.06);
+    --veil: rgba(22, 24, 30, 0.5);
+    --unlogged-fill: rgba(255, 255, 255, 0.14);
+    --upcoming-fill: rgba(255, 255, 255, 0.05);
+    --prayed: #58c08b;
+    --missed: #ef7263;
+  }
+}
+
+:root[data-theme="dark"] {
+    --fajr: #8f86f0;
+    --zuhr: #4fa8ec;
+    --asr: #e8ac55;
+    --maghrib: #f0897a;
+    --isha: #8083d8;
+
+    --text: #f2f4f7;
+    --text-dim: rgba(242, 244, 247, 0.58);
+    --text-faint: rgba(242, 244, 247, 0.36);
+    --hairline: rgba(255, 255, 255, 0.09);
+    --surface: rgba(255, 255, 255, 0.06);
+    --veil: rgba(22, 24, 30, 0.5);
+    --unlogged-fill: rgba(255, 255, 255, 0.14);
+    --upcoming-fill: rgba(255, 255, 255, 0.05);
+    --prayed: #58c08b;
+    --missed: #ef7263;
+  }
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI",
+    system-ui, sans-serif;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+.popover {
+  background: var(--veil);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.tab-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- countdown ring ---------- */
+
+.ring-block {
+  display: flex;
+  justify-content: center;
+  padding: 18px 0 6px;
+}
+
+.ring {
+  position: relative;
+  width: 144px;
+  height: 144px;
+}
+
+.ring svg {
+  transform: rotate(-90deg);
+  display: block;
+}
+
+.ring-track {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-width: 9;
+}
+
+.ring-arc {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 9;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 40%, transparent));
+}
+
+.ring-center {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  /* Keeps the longer lines inside the circle rather than over the arc. */
+  padding: 0 24px;
+  text-align: center;
+}
+
+.ring-prayer {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.ring-remaining {
+  font-size: 26px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.ring-clock {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.ring-tick {
+  color: var(--prayed);
+  font-weight: 700;
+}
+
+/* ---------- primary action ---------- */
+
+.prayed-button {
+  margin: 4px 18px 12px;
+  padding: 9px 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.prayed-button:hover {
+  opacity: 0.88;
+}
+
+.prayed-button:active {
+  opacity: 0.75;
+}
+
+.prayed-note {
+  margin: 4px 18px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ---------- today list ---------- */
+
+.prayer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.prayer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+
+.prayer-row.is-focus {
+  background: var(--surface);
+}
+
+.prayer-row.is-sunrise .prayer-name,
+.prayer-row.is-sunrise .prayer-time {
+  color: var(--text-faint);
+}
+
+.prayer-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.prayer-arabic {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.prayer-time {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.chip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.chip-prayed {
+  background: var(--prayed);
+}
+
+.chip-missed {
+  background: var(--missed);
+}
+
+.chip-unlogged {
+  border: 1.5px solid var(--text-faint);
+}
+
+.chip-active {
+  background: var(--accent);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+.chip-empty {
+  background: none;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- footer + tabs ---------- */
+
+.footer {
+  padding: 6px 0 7px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-top: 1px solid var(--hairline);
+}
+
+.tabbar {
+  display: flex;
+  border-top: 1px solid var(--hairline);
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 0 12px;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--text-dim);
+}
+
+.tab.is-selected {
+  color: var(--accent);
+}
+
+.placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 32px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.error {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 28px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* ---------- morning review ---------- */
+
+.review {
+  padding: 0 22px 18px;
+}
+
+.review-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.review-count {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.review-headline {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.review-detail {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.review-later,
+.review-now {
+  flex: 1;
+  padding: 9px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.review-later {
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--hairline);
+}
+
+.review-later:hover {
+  color: var(--text);
+}
+
+.review-now {
+  color: #fff;
+  background: var(--accent);
+  border: none;
+}
+
+.review-now:hover {
+  opacity: 0.88;
+}
+
+/* ---------- stats ---------- */
+
+.month-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 12px;
+}
+
+.month-label {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.month-head button {
+  font: inherit;
+  font-size: 16px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.month-head button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.month-head button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.grid-wrap {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 16px 14px;
+}
+
+.grid {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+}
+
+/* Part of the same grid as the cells: a separate column drifted out of
+   alignment the moment the cell size changed. */
+.grid-label {
+  display: flex;
+  align-items: center;
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+.cell {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  background: var(--upcoming-fill);
+}
+
+.cell.is-prayed {
+  background: var(--prayed);
+}
+
+.cell.is-missed {
+  background: var(--missed);
+}
+
+/* A solid fill reads at this size; a hairline outline did not. */
+.cell.is-unlogged {
+  background: var(--unlogged-fill);
+}
+
+.cell.is-upcoming {
+  background: var(--upcoming-fill);
+}
+
+.cell.is-selected {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tiles {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.tile {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.tile-value {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.1;
+  margin-bottom: 3px;
+}
+
+.tile-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-editor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 16px 14px;
+  margin-top: auto;
+}
+
+.cell-editor-label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-editor button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.cell-editor button:hover {
+  color: var(--text);
+}
+
+/* ---------- qaza ---------- */
+
+.qaza-head {
+  padding: 16px 18px 10px;
+}
+
+.qaza-total {
+  font-size: 31px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.qaza-total-label {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.qaza-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 18px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.qaza-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.qaza-name {
+  width: 58px;
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.qaza-bar {
+  flex: 1;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.qaza-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.qaza-count {
+  width: 30px;
+  flex: none;
+  text-align: right;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.qaza-madeup {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.qaza-madeup:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.qaza-madeup:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.qaza-input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+}
+
+.qaza-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.qaza-empty span {
+  color: var(--text-faint);
+}
+
+.qaza-link {
+  margin: 0 18px 14px;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.qaza-link:hover {
+  color: var(--text);
+}
+
+/* ---------- settings ---------- */
+
+.settings {
+  overflow-y: auto;
+  padding: 12px 0 14px;
+}
+
+.group {
+  padding: 0 16px 12px;
+}
+
+.group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 6px 0 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 0;
+  min-height: 26px;
+}
+
+.row-label {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-value {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.row-unit {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.row-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding-top: 2px;
+}
+
+.settings select,
+.settings input[type="number"],
+.settings input[type="time"],
+.settings input[type="text"],
+.search {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.settings select {
+  max-width: 130px;
+}
+
+.minutes {
+  width: 62px;
+  text-align: right;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.small {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.small:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.places {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.place {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.place span {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.place:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* ---------- onboarding ---------- */
+
+.onboarding {
+  padding: 16px 18px 14px;
+}
+
+.onboard-dots {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  padding-bottom: 14px;
+}
+
+.onboard-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hairline);
+}
+
+.onboard-dots span.is-active {
+  background: var(--accent);
+}
+
+.onboard-step {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.onboard-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.onboard-note {
+  margin: 4px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.onboard-current {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.onboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.onboard-skip {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.onboard-skip:hover {
+  color: var(--text-dim);
+}
+
+.onboard-next {
+  margin-left: auto;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 9px;
+  padding: 7px 18px;
+  cursor: pointer;
+}
+
+.onboard-next:hover {
+  opacity: 0.88;
+}
+
+/* ---------- month breakdown ---------- */
+
+.breakdown {
+  padding: 0 16px 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.breakdown-name {
+  width: 52px;
+  flex: none;
+  font-size: 12px;
+}
+
+.breakdown-bar {
+  flex: 1;
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--upcoming-fill);
+}
+
+.breakdown-bar span {
+  height: 100%;
+}
+
+.breakdown-count {
+  width: 42px;
+  flex: none;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.small.wide {
+  flex: 1;
+}
+
+/* ---------- home header ---------- */
+
+.home-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 0;
+}
+
+.place-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.place-chip:hover {
+  color: var(--text);
+}
+
+.place-panel {
+  padding: 16px 18px 14px;
+}
+
+/* Back arrow hard left, title centred on the panel — not sitting next to
+   the arrow, where it reads as a label for the arrow rather than a title
+   for the screen. The trailing spacer matches the arrow's width so the
+   centre is the panel's centre. */
+.panel-head {
+  display: flex;
+  align-items: center;
+  padding-bottom: 6px;
+}
+
+.panel-head::after {
+  content: "";
+  width: 22px;
+  flex: none;
+}
+
+
+
+.back-arrow {
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.back-arrow:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* The same title the month view uses, so a panel reads as a sibling of the
+   screens it sits beside rather than a different kind of thing. */
+.panel-title {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---------- collapsible section ---------- */
+
+.disclosure {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 6px;
+  padding: 6px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.disclosure .chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.disclosure:hover .chevron {
+  color: var(--text-dim);
+}
+
+/* ---------- surah mulk row ---------- */
+
+.mulk-row {
+  width: calc(100% - 20px);
+  margin: 2px 10px 8px;
+  border: none;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding-top: 10px;
+}
+
+.mulk-row:hover .mulk-state {
+  color: var(--text);
+}
+
+.mulk-state {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.mulk-state.is-done {
+  color: var(--prayed);
+  font-weight: 600;
+}
+
+/* A quiet text button, for an action that is available but not the point
+   of the screen it sits on. */
+.linky {
+  display: block;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  padding: 7px 0 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.linky:hover {
+  color: var(--text);
+}
