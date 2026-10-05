@@ -276,7 +276,11 @@ export default function App() {
       };
       await invoke("save_settings", { settings: next });
       setSettings(next);
-      setChangingPlace(false);
+      // Deliberately staying put. Closing the panel the instant a place is
+      // picked threw the user back to Today before they could see what had
+      // been saved — worst with "use my current location", where the whole
+      // question is which place it found. The row above updates to the
+      // saved name, and the back arrow is right there.
       refresh();
     },
     [settings, refresh]
