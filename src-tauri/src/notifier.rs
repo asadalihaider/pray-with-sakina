@@ -30,10 +30,12 @@ use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, AnyThread};
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSSet, NSString};
 use objc2_user_notifications::{
-    UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent, UNNotification,
+    UNAlertStyle, UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent,
+    UNNotification,
     UNNotificationAction, UNNotificationActionOptions, UNNotificationCategory,
     UNNotificationCategoryOptions, UNNotificationPresentationOptions, UNNotificationRequest,
-    UNNotificationResponse, UNNotificationSettings, UNUserNotificationCenter,
+    UNNotificationResponse, UNNotificationSetting, UNNotificationSettings,
+    UNUserNotificationCenter,
     UNUserNotificationCenterDelegate,
 };
 
@@ -65,6 +67,35 @@ pub fn status() -> Permission {
         Ok(status) => Permission::from(status),
         Err(_) => Permission::Unknown,
     }
+}
+
+/// What macOS will actually do with a reminder, in its own words.
+///
+/// Worth asking rather than inferring. Whether a reminder appears on screen
+/// is the user's setting, and the only honest way to tell them what it is
+/// set to is to read it — the alternative is guessing from whether they
+/// noticed something.
+pub fn presentation() -> Presentation {
+    let (sender, receiver) = mpsc::channel();
+    let handler = StackBlock::new(move |settings: std::ptr::NonNull<UNNotificationSettings>| {
+        // Safety: the handler owns this reference for the duration of the
+        // call, which is inside this block.
+        let settings = unsafe { settings.as_ref() };
+        let _ = sender.send(Presentation {
+            permission: Permission::from(settings.authorizationStatus()),
+            style: match settings.alertStyle() {
+                UNAlertStyle::None => Style::Off,
+                UNAlertStyle::Banner => Style::Temporary,
+                UNAlertStyle::Alert => Style::Persistent,
+                _ => Style::Unknown,
+            },
+            on_screen: settings.alertSetting() == UNNotificationSetting::Enabled,
+            in_centre: settings.notificationCenterSetting() == UNNotificationSetting::Enabled,
+        });
+    });
+    center().getNotificationSettingsWithCompletionHandler(&handler);
+
+    receiver.recv_timeout(REPLY_TIMEOUT).unwrap_or_default()
 }
 
 /// Asks for permission, which macOS turns into a prompt the first time and
@@ -134,11 +165,37 @@ fn post(
     }
 }
 
+/// How long a reminder stays on screen, as macOS has it configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Style {
+    /// Nothing appears on screen at all; reminders only reach Notification
+    /// Center, which is the one setting that defeats the whole app.
+    Off,
+    /// macOS's default: it dismisses itself after a few seconds.
+    Temporary,
+    /// Stays until the user deals with it. What this app wants.
+    Persistent,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Presentation {
+    pub permission: Permission,
+    pub style: Style,
+    /// Whether anything is allowed on screen, separately from its style.
+    pub on_screen: bool,
+    pub in_centre: bool,
+}
+
 /// macOS's answer, reduced to what the UI has to say about it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Permission {
     /// Never asked. The prompt has not been shown yet.
+    #[default]
     Unasked,
     Granted,
     Denied,

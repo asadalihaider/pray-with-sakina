@@ -183,15 +183,17 @@ async fn send_test_reminder() -> Result<(), String> {
 
 /// What macOS currently allows, so the UI can say something true rather
 /// than guessing.
+#[cfg(target_os = "macos")]
 #[tauri::command]
-async fn reminder_permission() -> String {
-    #[cfg(target_os = "macos")]
-    return tauri::async_runtime::spawn_blocking(|| format!("{:?}", notifier::status()))
+async fn reminder_permission() -> notifier::Presentation {
+    tauri::async_runtime::spawn_blocking(notifier::presentation)
         .await
-        .unwrap_or_else(|_| "Unknown".to_string());
-    #[cfg(not(target_os = "macos"))]
-    "Unknown".to_string()
+        .unwrap_or_default()
 }
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn reminder_permission() -> () {}
 
 /// Opens Sakina's own page in System Settings → Notifications.
 ///
@@ -360,9 +362,8 @@ async fn detect_location(app: AppHandle) -> Result<location::DetectedLocation, S
         // "macOS refused", and those need different things from the user.
         //
         // Read on the main thread, because the manager is thread-local:
-        // asking from here built a *second* manager and reported its
-        // status, which is always "not answered yet" and said nothing
-        // about the one that had been asked.
+        // asking from here built a second manager and reported *its*
+        // status, which is always "not answered yet" and told us nothing.
         Ok(Err(error)) => Err(format!(
             "{} (location access: {})",
             error.message(),

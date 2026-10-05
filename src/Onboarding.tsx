@@ -3,6 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import CitySearch, { type Place } from "./CitySearch";
 import type { SettingsData } from "./Settings";
 
+/// What macOS says it will do with a reminder. Read rather than assumed:
+/// whether one appears on screen is the user's setting, and the only honest
+/// way to say what it is set to is to ask.
+type Reminders = {
+  permission: "unasked" | "granted" | "denied" | "unknown";
+  style: "off" | "temporary" | "persistent" | "unknown";
+  onScreen: boolean;
+  inCentre: boolean;
+};
+
 type PrayerKey = "fajr" | "zuhr" | "asr" | "maghrib" | "isha";
 const PRAYERS: PrayerKey[] = ["fajr", "zuhr", "asr", "maghrib", "isha"];
 
@@ -36,6 +46,7 @@ export default function Onboarding({
   const [backlog, setBacklog] = useState<Record<string, string>>({});
   const [locating, setLocating] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [reminders, setReminders] = useState<Reminders | null>(null);
 
   // Everything here has a working default, so leaving at any point has to
   // be a complete exit rather than a half-configured state.
@@ -58,10 +69,27 @@ export default function Onboarding({
   // natural moment for macOS to ask permission.
   const announced = useRef(false);
   useEffect(() => {
-    if (step !== 2 || announced.current) return;
-    announced.current = true;
-    invoke("send_test_reminder").catch((error) => setSendError(String(error)));
+    if (step !== 2) return;
+    const look = () =>
+      invoke<Reminders>("reminder_permission").then(setReminders).catch(() => {});
+    if (!announced.current) {
+      announced.current = true;
+      invoke("send_test_reminder")
+        .catch((error) => setSendError(String(error)))
+        .finally(look);
+    }
+    // Looked at again when the panel comes back, because the way out of
+    // this screen is System Settings and the answer changes while the user
+    // is over there.
+    window.addEventListener("focus", look);
+    look();
+    return () => window.removeEventListener("focus", look);
   }, [step]);
+
+  // Everything this screen asks for is done: permission given, and
+  // reminders set to wait on screen rather than slide away.
+  const remindersReady =
+    reminders?.permission === "granted" && reminders?.style === "persistent";
 
   const choose = (place: Place) =>
     setDraft({
@@ -141,7 +169,28 @@ export default function Onboarding({
             <strong>waits</strong> for you — one that disappears on its own
             is a prayer missed for the very reason you installed this.
           </div>
-          {sendError ? (
+          {/* Each case gets the one instruction that applies to it. A
+              screen that lists every possibility is a screen the user has
+              to diagnose themselves. */}
+          {reminders?.permission === "denied" ? (
+            <div className="onboard-note onboard-aside is-error">
+              macOS is blocking Sakina's notifications, so nothing will
+              reach you. Open your Mac settings below and turn{" "}
+              <strong>Allow notifications</strong> on. Once it has been
+              refused, macOS will not ask again on its own.
+            </div>
+          ) : reminders?.style === "off" || reminders?.onScreen === false ? (
+            <div className="onboard-note onboard-aside is-error">
+              Reminders are reaching Notification Center but never your
+              screen. Open your Mac settings below and set the alert style
+              to <strong>Persistent</strong>.
+            </div>
+          ) : reminders?.style === "persistent" ? (
+            <div className="onboard-note onboard-aside">
+              Set to <strong>Persistent</strong> — a reminder will wait on
+              screen until you dismiss it. Nothing else to do here.
+            </div>
+          ) : sendError ? (
             <div className="onboard-note onboard-aside is-error">
               {sendError}
             </div>
@@ -196,10 +245,11 @@ export default function Onboarding({
             onClick={() => setStep(step + 1)}
             disabled={locating}
           >
-            {/* On the notifications screen the forward button is a refusal,
-                not a confirmation: nothing here has been set up unless the
-                user went to System Settings and did it. */}
-            {step === 2 ? "Set up later" : "Next"}
+            {/* On the notifications screen the forward button is a
+                refusal rather than a confirmation — unless macOS says it
+                is already set up, in which case calling it "set up later"
+                is simply untrue. */}
+            {step === 2 && !remindersReady ? "Set up later" : "Next"}
           </button>
         ) : (
           <button className="onboard-next" onClick={finish}>
