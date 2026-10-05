@@ -178,12 +178,22 @@ mod platform {
     /// What macOS currently says about location access, for error messages
     /// that can tell "never answered" apart from "refused".
     pub fn status_name() -> &'static str {
-        with_manager(|manager| match unsafe { manager.authorizationStatus() } {
-            CLAuthorizationStatus::NotDetermined => "not answered yet",
-            CLAuthorizationStatus::Restricted => "restricted",
-            CLAuthorizationStatus::Denied => "denied",
-            CLAuthorizationStatus::AuthorizedAlways => "allowed",
-            _ => "unknown",
+        with_manager(|manager| {
+            // Deprecated in favour of checking the status alone, but it is
+            // the only way to tell "Location Services is off for the whole
+            // Mac" from "this app was refused", and those read very
+            // differently to someone trying to fix it.
+            #[allow(deprecated)]
+            if !unsafe { manager.locationServicesEnabled() } {
+                return "turned off for this Mac";
+            }
+            match unsafe { manager.authorizationStatus() } {
+                CLAuthorizationStatus::NotDetermined => "not answered yet",
+                CLAuthorizationStatus::Restricted => "restricted",
+                CLAuthorizationStatus::Denied => "denied",
+                CLAuthorizationStatus::AuthorizedAlways => "allowed",
+                _ => "unknown",
+            }
         })
     }
 

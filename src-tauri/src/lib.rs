@@ -296,6 +296,17 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
     };
 }
 
+/// Reads the authorisation status where the manager actually lives.
+fn main_thread_location_status(app: &AppHandle) -> String {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let _ = app.run_on_main_thread(move || {
+        let _ = sender.send(location::status_name().to_string());
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
 /// Polls CoreLocation on the main thread until a fix arrives. The manager
 /// needs a run loop, so the work has to hop back to the main thread each
 /// time rather than blocking it for the whole wait.
@@ -347,10 +358,15 @@ async fn detect_location(app: AppHandle) -> Result<location::DetectedLocation, S
         Ok(Ok(found)) => Ok(found),
         // The bare message cannot tell "macOS never asked" apart from
         // "macOS refused", and those need different things from the user.
+        //
+        // Read on the main thread, because the manager is thread-local:
+        // asking from here built a *second* manager and reported its
+        // status, which is always "not answered yet" and said nothing
+        // about the one that had been asked.
         Ok(Err(error)) => Err(format!(
             "{} (location access: {})",
             error.message(),
-            location::status_name()
+            main_thread_location_status(&releaser)
         )),
         Err(_) => Err(location::LocationError::Unavailable.message().to_string()),
     }
