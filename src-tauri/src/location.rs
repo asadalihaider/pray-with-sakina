@@ -56,9 +56,41 @@ mod platform {
     use std::cell::RefCell;
 
     use objc2::rc::Retained;
-    use objc2_core_location::{CLAuthorizationStatus, CLLocationManager};
+    use objc2::runtime::ProtocolObject;
+    use objc2::{define_class, msg_send, AnyThread};
+    use objc2_core_location::{
+        CLAuthorizationStatus, CLLocationManager, CLLocationManagerDelegate,
+    };
+    use objc2_foundation::{NSError, NSObject, NSObjectProtocol};
 
     use super::{DetectedLocation, LocationError};
+
+    define_class!(
+        /// CoreLocation needs a delegate assigned *before* authorisation is
+        /// requested. Without one the request is accepted and then nothing
+        /// happens: no prompt, no callback, and `locationd` records no
+        /// decision at all — which reads to the user as "could not get a
+        /// location" after a long wait.
+        ///
+        /// Nothing here has to *do* anything. The methods exist because
+        /// their presence is what makes the manager behave.
+        #[unsafe(super(NSObject))]
+        #[thread_kind = AnyThread]
+        #[name = "SakinaLocationDelegate"]
+        struct Delegate;
+
+        impl Delegate {}
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl CLLocationManagerDelegate for Delegate {
+            #[unsafe(method(locationManagerDidChangeAuthorization:))]
+            fn did_change_authorization(&self, _manager: &CLLocationManager) {}
+
+            #[unsafe(method(locationManager:didFailWithError:))]
+            fn did_fail(&self, _manager: &CLLocationManager, _error: &NSError) {}
+        }
+    );
 
     thread_local! {
         /// Main-thread only. The manager has to outlive the call that starts
@@ -70,7 +102,18 @@ mod platform {
     fn with_manager<T>(action: impl FnOnce(&CLLocationManager) -> T) -> T {
         MANAGER.with(|slot| {
             let mut slot = slot.borrow_mut();
-            let manager = slot.get_or_insert_with(|| unsafe { CLLocationManager::new() });
+            let manager = slot.get_or_insert_with(|| {
+                let manager = unsafe { CLLocationManager::new() };
+                let delegate: Retained<Delegate> =
+                    unsafe { msg_send![Delegate::alloc(), init] };
+                unsafe {
+                    manager.setDelegate(Some(ProtocolObject::from_ref(&*delegate)))
+                };
+                // The manager holds its delegate weakly, so this has to
+                // outlive the call that set it.
+                std::mem::forget(delegate);
+                manager
+            });
             action(manager)
         })
     }
@@ -132,6 +175,18 @@ mod platform {
             .flatten()
     }
 
+    /// What macOS currently says about location access, for error messages
+    /// that can tell "never answered" apart from "refused".
+    pub fn status_name() -> &'static str {
+        with_manager(|manager| match unsafe { manager.authorizationStatus() } {
+            CLAuthorizationStatus::NotDetermined => "not answered yet",
+            CLAuthorizationStatus::Restricted => "restricted",
+            CLAuthorizationStatus::Denied => "denied",
+            CLAuthorizationStatus::AuthorizedAlways => "allowed",
+            _ => "unknown",
+        })
+    }
+
     /// `Ok(None)` means "still waiting" — authorisation may not have been
     /// answered yet, and a first fix takes a moment.
     pub fn poll(timezone: String) -> Result<Option<DetectedLocation>, LocationError> {
@@ -170,12 +225,16 @@ mod platform {
     pub fn name_for(_latitude: f64, _longitude: f64) -> Option<String> {
         None
     }
+    pub fn status_name() -> &'static str {
+        "unavailable"
+    }
+
     pub fn poll(_timezone: String) -> Result<Option<DetectedLocation>, LocationError> {
         Err(LocationError::Unavailable)
     }
 }
 
-pub use platform::{name_for, poll, start, stop};
+pub use platform::{name_for, poll, start, status_name, stop};
 
 pub fn timezone_now() -> String {
     system_timezone()

@@ -260,7 +260,13 @@ async fn detect_location(app: AppHandle) -> Result<location::DetectedLocation, S
 
     match result {
         Ok(Ok(found)) => Ok(found),
-        Ok(Err(error)) => Err(error.message().to_string()),
+        // The bare message cannot tell "macOS never asked" apart from
+        // "macOS refused", and those need different things from the user.
+        Ok(Err(error)) => Err(format!(
+            "{} (location access: {})",
+            error.message(),
+            location::status_name()
+        )),
         Err(_) => Err(location::LocationError::Unavailable.message().to_string()),
     }
 }
