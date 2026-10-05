@@ -40,7 +40,8 @@ the plan's status table.
 | Reminders are suppressed during **Focus / Do Not Disturb** | macOS only allows an app past Focus with the Time Sensitive entitlement, which needs a signed build and the user opting in. Not something a setting can force. |
 | The panel does not appear over a **fullscreen app** | Apple's own SwiftUI `MenuBarExtra` has the same problem, and the documented `presentationOptions` workaround is ignored. |
 | An auto-hidden **menu bar** still hides behind the panel | macOS reveals it for the pointer or a real `NSMenu`, and a web view can be neither. |
-| Builds are **not notarised** | Notarisation needs a paid Apple Developer account. Without one, macOS refuses a downloaded build on first open: **System Settings → Privacy & Security → Open Anyway**, once per install. |
+| Builds are **not notarised** | Notarisation needs a paid Apple Developer account. Without one, macOS refuses a downloaded build on first open: **System Settings → Privacy & Security → Open Anyway**, once per install. Signing itself is free and is required — see "Running it". |
+| Reminders only **wait on screen** if the user picks **Alerts** | macOS defaults every app to *Banners*, which dismiss themselves after a few seconds. Nothing an app can declare changes that default; the style belongs to the user. Onboarding sends a test reminder and links straight to the setting. |
 | The tray icon has **no right-click menu**; Quit is on a **double click** | `tray-icon` 0.24 attaches a menu to the status item permanently, and macOS 27 pops it on left click, swallowing every attempt to open the panel. The menu is built and shown by hand instead. |
 | Pausing reminders while the **mic or camera** is in use is a setting that exists but does nothing yet | |
 
@@ -60,9 +61,34 @@ click cannot route back to the app. Test them against a real bundle:
 
 ```bash
 cd app
-npm run tauri build
+APPLE_SIGNING_IDENTITY="Sakina Local Signing" npm run tauri build
 open src-tauri/target/release/bundle/macos/Sakina.app
 ```
+
+**The signature is not optional.** `UNUserNotificationCenter` refuses an
+ad-hoc signed app outright: asking for permission returns denied without
+ever showing a prompt, and delivery fails with `UNErrorDomain` 1,
+"notifications not allowed". Any ordinary signature satisfies it — it does
+**not** have to come from a paid Apple Developer account. A self-signed
+certificate works:
+
+```bash
+# once, then it lives in your login keychain
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+  -keyout key.pem -out cert.pem \
+  -subj "/CN=Sakina Local Signing/O=Sakina" \
+  -addext "basicConstraints=critical,CA:false" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning"
+openssl pkcs12 -export -inkey key.pem -in cert.pem -out id.p12 \
+  -passout pass:CHANGEME -name "Sakina Local Signing" \
+  -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+security import id.p12 -k ~/Library/Keychains/login.keychain-db \
+  -P CHANGEME -A
+```
+
+The legacy PKCS#12 algorithms are deliberate: macOS cannot read what
+OpenSSL 3 produces by default.
 
 Tests — 72 of them, covering the prayer time maths, window rules, the nudge
 schedule, the storage layer, the review floor, and the settings migrations:
