@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Signing turns on the hardened runtime, and under it CoreLocation is
+       not merely refused — locationd declines to show the permission
+       prompt at all, logging "Client has supported the hardened runtime but
+       doesn't have the entitlement". The request then waits for an answer
+       that can never arrive, which the user sees as a spinner followed by
+       "could not get a location".
+
+       Prayer times are computed on this Mac from these coordinates and
+       nothing is sent anywhere; see NSLocationWhenInUseUsageDescription. -->
+  <key>com.apple.security.personal-information.location</key>
+  <true/>
+</dict>
+</plist>
