@@ -23,8 +23,13 @@ type Detected = {
 
 export default function CitySearch({
   onPick,
+  onBusy,
 }: {
   onPick: (place: Place) => void;
+  /// Reported upward because the screen around this one has to stop
+  /// accepting Next and Skip while a fix is being waited for: leaving now
+  /// saves a location that is about to be replaced.
+  onBusy?: (busy: boolean) => void;
 }) {
   const [query, setQuery] = useState("");
   const [places, setPlaces] = useState<Place[] | null>(null);
@@ -34,6 +39,7 @@ export default function CitySearch({
 
   const useMyLocation = async () => {
     setLocating(true);
+    onBusy?.(true);
     setProblem(null);
     try {
       const found = await invoke<Detected>("detect_location");
@@ -49,6 +55,7 @@ export default function CitySearch({
       setProblem(String(error));
     } finally {
       setLocating(false);
+      onBusy?.(false);
     }
   };
 

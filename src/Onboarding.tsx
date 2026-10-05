@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import CitySearch, { type Place } from "./CitySearch";
 import type { SettingsData } from "./Settings";
@@ -34,6 +34,8 @@ export default function Onboarding({
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(settings);
   const [backlog, setBacklog] = useState<Record<string, string>>({});
+  const [locating, setLocating] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   // Everything here has a working default, so leaving at any point has to
   // be a complete exit rather than a half-configured state.
@@ -50,6 +52,17 @@ export default function Onboarding({
     onDone();
   };
 
+  // Sending on arrival rather than on a button press. The screen's whole
+  // job is to let the user *see* a reminder, and a button they have to find
+  // first is a screen that explains instead of demonstrating. It is also the
+  // natural moment for macOS to ask permission.
+  const announced = useRef(false);
+  useEffect(() => {
+    if (step !== 2 || announced.current) return;
+    announced.current = true;
+    invoke("send_test_reminder").catch((error) => setSendError(String(error)));
+  }, [step]);
+
   const choose = (place: Place) =>
     setDraft({
       ...draft,
@@ -62,7 +75,7 @@ export default function Onboarding({
   return (
     <div className="tab-body onboarding">
       <div className="onboard-dots">
-        {[0, 1, 2].map((index) => (
+        {[0, 1, 2, 3].map((index) => (
           <span key={index} className={index === step ? "is-active" : ""} />
         ))}
       </div>
@@ -74,7 +87,7 @@ export default function Onboarding({
             Prayer times are calculated from your location. Nothing is sent
             anywhere except the city name you search for.
           </div>
-          <CitySearch onPick={choose} />
+          <CitySearch onPick={choose} onBusy={setLocating} />
           <div className="onboard-current">{draft.locationName}</div>
         </div>
       )}
@@ -121,6 +134,35 @@ export default function Onboarding({
 
       {step === 2 && (
         <div className="onboard-step">
+          <div className="onboard-title">Notifications that stay</div>
+          <div className="onboard-note">
+            One has just been sent, so you can see what a reminder looks
+            like. Sakina is only useful if a reminder{" "}
+            <strong>waits</strong> for you — one that disappears on its own
+            is a prayer missed for the very reason you installed this.
+          </div>
+          {sendError ? (
+            <div className="onboard-note onboard-aside is-error">
+              {sendError}
+            </div>
+          ) : (
+            <div className="onboard-note onboard-aside">
+              Open your Mac settings below, then set Sakina's alert style to{" "}
+              <strong>Persistent</strong>. Reminders will then stay on screen
+              until you dismiss them yourself.
+            </div>
+          )}
+          <button
+            className="onboard-settings"
+            onClick={() => invoke("open_notification_settings")}
+          >
+            Open your Mac settings
+          </button>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="onboard-step">
           <div className="onboard-title">Any Qaza to carry over?</div>
           <div className="onboard-note">
             A rough figure is fine, and you can leave this empty. Only
@@ -145,12 +187,19 @@ export default function Onboarding({
       )}
 
       <div className="onboard-actions">
-        <button className="onboard-skip" onClick={finish}>
+        <button className="onboard-skip" onClick={finish} disabled={locating}>
           Skip
         </button>
-        {step < 2 ? (
-          <button className="onboard-next" onClick={() => setStep(step + 1)}>
-            Next
+        {step < 3 ? (
+          <button
+            className="onboard-next"
+            onClick={() => setStep(step + 1)}
+            disabled={locating}
+          >
+            {/* On the notifications screen the forward button is a refusal,
+                not a confirmation: nothing here has been set up unless the
+                user went to System Settings and did it. */}
+            {step === 2 ? "Set up later" : "Next"}
           </button>
         ) : (
           <button className="onboard-next" onClick={finish}>
