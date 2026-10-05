@@ -17,6 +17,11 @@
   --upcoming-fill: rgba(20, 22, 26, 0.04);
   --prayed: #3b9c6a;
   --missed: #cf4a3c;
+
+  /* The parts of a form control the OS draws itself — the caret, the number
+     spinners, the popup a select opens — follow this and not our variables.
+     Without it they are rendered light whatever the rest of the panel does. */
+  color-scheme: light;
 }
 
 /* Dark values live in one block, applied either by system preference (unless
@@ -39,6 +44,8 @@
     --upcoming-fill: rgba(255, 255, 255, 0.05);
     --prayed: #58c08b;
     --missed: #ef7263;
+
+    color-scheme: dark;
   }
 }
 
@@ -59,7 +66,9 @@
     --upcoming-fill: rgba(255, 255, 255, 0.05);
     --prayed: #58c08b;
     --missed: #ef7263;
-  }
+
+    color-scheme: dark;
+}
 
 * {
   box-sizing: border-box;
@@ -749,10 +758,15 @@ body {
   padding-top: 2px;
 }
 
+/* Scoped to both screens that have form controls. Scoping these to
+   `.settings` alone left every input and select in onboarding completely
+   unstyled — a white field on a dark panel. */
 .settings select,
 .settings input[type="number"],
 .settings input[type="time"],
 .settings input[type="text"],
+.onboarding select,
+.onboarding input[type="number"],
 .search {
   font: inherit;
   font-size: 12px;
@@ -763,7 +777,8 @@ body {
   padding: 3px 6px;
 }
 
-.settings select {
+.settings select,
+.onboarding select {
   max-width: 130px;
 }
 
