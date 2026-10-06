@@ -53,6 +53,19 @@ curl -L https://github.com/asadalihaider/pray-with-sakina/releases/latest/downlo
   | tar -xf - -C /Applications && open /Applications/Sakina.app
 ```
 
+### With Homebrew
+
+```bash
+brew install --cask asadalihaider/sakina/sakina
+```
+
+Homebrew flags what it downloads, so this still goes through **Open Anyway** on
+first launch. Adding `--no-quarantine` skips that. The cask will not do it for
+you: waiving a security check should be a decision you make rather than one a
+file you installed makes quietly on your behalf.
+
+Upgrading later is `brew upgrade --cask sakina`.
+
 ### First run
 
 Sakina asks for two permissions, and explains itself before each:
