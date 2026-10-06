@@ -59,6 +59,9 @@ export default function CitySearch({
       });
       setFetched(name);
     } catch (error) {
+      // Where macOS holds a refusal, the command has already opened the
+      // Location Services switch — there is nothing for the user to decide
+      // and so nothing here to offer them.
       setProblem(String(error));
     } finally {
       setLocating(false);

@@ -35,10 +35,10 @@ impl LocationError {
     pub fn message(self) -> &'static str {
         match self {
             LocationError::Denied => {
-                "Location access is off for Sakina. Turn it on in System Settings → Privacy & Security → Location Services, or search for your city instead."
+                "Location access for Sakina is off, and macOS will not ask again. Switch it on in the window that just opened, then try again — or search for your city instead."
             }
             LocationError::Unavailable => {
-                "Location services are unavailable on this Mac. Search for your city instead."
+                "Location Services is off for this Mac. Switch it on in the window that just opened, then try again — or search for your city instead."
             }
             LocationError::TimedOut => {
                 "Could not get a location in time. Search for your city instead."
@@ -226,6 +226,27 @@ mod platform {
     }
 }
 
+/// Whether asking is worth doing at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    /// Either already allowed, or never answered — in both cases starting
+    /// the manager is the right move, and it is what raises the dialog.
+    Askable,
+    /// macOS holds a refusal. There is no dialog left to raise.
+    Refused,
+    /// Location Services is off for the whole Mac.
+    Unavailable,
+}
+
+/// Classifies what `status_name` reported.
+pub fn status_for(status: &str) -> Standing {
+    match status {
+        "denied" | "restricted" => Standing::Refused,
+        "turned off for this Mac" => Standing::Unavailable,
+        _ => Standing::Askable,
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 mod platform {
     use super::{DetectedLocation, LocationError};
@@ -253,6 +274,25 @@ pub fn timezone_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_is_not_worth_asking_about() {
+        // Ten seconds of polling cannot change a recorded refusal, and the
+        // timeout it ends in blames the wrong thing.
+        assert_eq!(status_for("denied"), Standing::Refused);
+        assert_eq!(status_for("restricted"), Standing::Refused);
+        assert_eq!(status_for("turned off for this Mac"), Standing::Unavailable);
+    }
+
+    #[test]
+    fn an_unanswered_request_is_still_worth_making() {
+        // This is the case that raises the dialog, so it must go ahead.
+        assert_eq!(status_for("not answered yet"), Standing::Askable);
+        assert_eq!(status_for("allowed"), Standing::Askable);
+        // And anything unrecognised is worth trying rather than refusing on
+        // our own authority.
+        assert_eq!(status_for("something new"), Standing::Askable);
+    }
 
     #[test]
     fn the_system_timezone_is_readable() {

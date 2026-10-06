@@ -298,6 +298,29 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
     };
 }
 
+/// The pane holding the Location Services switch.
+const LOCATION_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices";
+
+/// Opens the pane holding the Location Services switch.
+///
+/// Called by the app rather than offered to the user, because once
+/// location has been refused `requestWhenInUseAuthorization` returns the
+/// refusal without asking anyone: there is no dialog left to raise and
+/// this is the only way back, so there is nothing to decide.
+fn open_location_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            // Spelled on one line. Assembled with a continuation it collapsed
+            // into literal spaces inside the string, and macOS answers a URL it
+            // cannot parse by opening System Settings wherever it last was —
+            // which looks exactly like the link pointing somewhere useless.
+            .arg(LOCATION_SETTINGS_URL)
+            .spawn();
+    }
+}
+
 /// Reads the authorisation status where the manager actually lives.
 fn main_thread_location_status(app: &AppHandle) -> String {
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -316,6 +339,30 @@ fn main_thread_location_status(app: &AppHandle) -> String {
 async fn detect_location(app: AppHandle) -> Result<location::DetectedLocation, String> {
     const ATTEMPTS: u32 = 20;
     const GAP: std::time::Duration = std::time::Duration::from_millis(500);
+
+    // Asked before starting, not after failing. Where macOS already holds a
+    // refusal, `requestWhenInUseAuthorization` returns it without asking
+    // anyone and no fix will ever arrive — so polling for ten seconds and
+    // then reporting a timeout spends the user's patience to tell them
+    // something that was knowable immediately, and tells them the wrong
+    // thing while it is at it.
+    //
+    // Where it has, the switch is opened here rather than offered as a
+    // second button to press. One press of "use my location" should either
+    // find a location or put the only remedy in front of the user; making
+    // them click again to be taken somewhere they have no choice about is
+    // a step that exists only because the app could not make up its mind.
+    match location::status_for(main_thread_location_status(&app).as_str()) {
+        location::Standing::Refused => {
+            open_location_settings();
+            return Err(location::LocationError::Denied.message().to_string());
+        }
+        location::Standing::Unavailable => {
+            open_location_settings();
+            return Err(location::LocationError::Unavailable.message().to_string());
+        }
+        location::Standing::Askable => {}
+    }
 
     let timezone = location::timezone_now();
     hold_panel_open(&app.state::<AppState>());
