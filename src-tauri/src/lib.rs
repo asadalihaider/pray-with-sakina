@@ -183,6 +183,27 @@ async fn send_test_reminder() -> Result<(), String> {
 
 /// What macOS currently allows, so the UI can say something true rather
 /// than guessing.
+/// Raises the macOS permission dialog, where that is still possible.
+///
+/// Only while the status is undetermined — which happens when the first
+/// request was dismissed rather than answered. Once macOS holds an answer,
+/// allowed or refused, `requestAuthorization` returns it without asking
+/// anyone, and System Settings is the only way to change it.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn ask_for_reminders() -> notifier::Presentation {
+    tauri::async_runtime::spawn_blocking(|| {
+        notifier::request();
+        notifier::presentation()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn ask_for_reminders() {}
+
 #[cfg(target_os = "macos")]
 #[tauri::command]
 async fn reminder_permission() -> notifier::Presentation {
@@ -211,7 +232,7 @@ fn open_notification_settings(app: AppHandle) {
     {
         let _ = std::process::Command::new("open")
             .arg(format!(
-                "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={}",
+                "x-apple.systempreferences:com.apple.preference.notifications?id={}",
                 app.config().identifier
             ))
             .spawn();
@@ -827,6 +848,7 @@ pub fn run() {
             preview_reminder,
             send_test_reminder,
             reminder_permission,
+            ask_for_reminders,
             open_notification_settings,
             log_mulk,
             detect_location

@@ -172,7 +172,25 @@ export default function Onboarding({
           {/* Each case gets the one instruction that applies to it. A
               screen that lists every possibility is a screen the user has
               to diagnose themselves. */}
-          {reminders?.permission === "denied" ? (
+          {/* Dismissed rather than answered, which is the one case where
+              the dialog can still be raised. Sending the user to System
+              Settings here would be the wrong tool. */}
+          {reminders?.permission === "unasked" ? (
+            <>
+              <div className="onboard-note onboard-aside">
+                macOS has not been asked yet — the dialog was closed without
+                an answer.
+              </div>
+              <button
+                className="onboard-ask"
+                onClick={() =>
+                  invoke<Reminders>("ask_for_reminders").then(setReminders)
+                }
+              >
+                Allow notifications
+              </button>
+            </>
+          ) : reminders?.permission === "denied" ? (
             <div className="onboard-note onboard-aside is-error">
               macOS is blocking Sakina's notifications, so nothing will
               reach you. Open your Mac settings below and turn{" "}

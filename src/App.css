@@ -892,6 +892,26 @@ body {
   color: var(--text-dim);
 }
 
+/* The primary action when macOS can still be asked: filled, because it is
+   the thing to press rather than a way out of a problem. */
+.onboard-ask {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.onboard-ask:hover {
+  border-color: var(--text-faint);
+}
+
 /* The way out of this screen's one real limitation, so it sits apart from
    the test button and stays visible whether or not a test was sent. */
 .onboard-settings {
