@@ -16,11 +16,11 @@ DATA="$HOME/Library/Application Support/dev.asadalihaider.sakina"
 # Signing is not optional: UNUserNotificationCenter refuses an ad-hoc
 # bundle outright, and the hardened runtime needs the entitlements that
 # only a signed build carries. See README.
-IDENTITY=$(security find-certificate -c "Sakina Local Signing" -Z \
+IDENTITY=$(security find-certificate -c "Sakina Signing" -Z \
   ~/Library/Keychains/login.keychain-db 2>/dev/null \
   | awk '/SHA-1 hash/{print $3}' | head -1)
 if [ -z "$IDENTITY" ]; then
-  echo "No 'Sakina Local Signing' certificate found. See README → Running it." >&2
+  echo "No 'Sakina Signing' certificate found. See README → Building it." >&2
   exit 1
 fi
 
