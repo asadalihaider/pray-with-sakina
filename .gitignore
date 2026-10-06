@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Working notes, and the signing material a release is built with
+notes/
+release/
