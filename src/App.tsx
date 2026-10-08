@@ -217,13 +217,22 @@ export default function App() {
   }, [applyTheme]);
 
   const refresh = useCallback(async () => {
+    // Nothing to fetch before a place is set. The view is calculated from
+    // one, so asking anyway returns "no location set" and turns a first run
+    // into an error screen instead of onboarding — which is a worse version
+    // of the problem onboarding exists to solve.
+    if (!configured) {
+      setView(null);
+      setError(null);
+      return;
+    }
     try {
       setView(await invoke<TodayView>("get_today"));
       setError(null);
     } catch (problem) {
       setError(String(problem));
     }
-  }, []);
+  }, [configured]);
 
   // Yesterday's unanswered prayers get one pass before the day starts.
   const loadReview = useCallback(async () => {
@@ -312,7 +321,10 @@ export default function App() {
       style={{ ["--accent" as string]: accent }}
       data-tauri-drag-region="deep"
     >
-      {error && !changingPlace && (
+      {/* An error never outranks onboarding: with no place set, the only
+          screen worth showing is the one that asks for it. Getting this
+          precedence backwards turned a first run into a dead end. */}
+      {error && configured && !changingPlace && (
         <div className="error">
           <span>{error}</span>
           {/* Without this the screen is a dead end: the one thing that can
@@ -345,7 +357,7 @@ export default function App() {
         </div>
       )}
 
-      {!error && settings && !configured && (
+      {settings && !configured && (
         <Onboarding
           settings={settings}
           onDone={() => {
