@@ -137,7 +137,7 @@ mod tests {
     /// 2026-06-15 in Gujranwala: Zuhr runs 12:01-16:24 local (07:01-11:24
     /// UTC), so the +60 minute first nudge lands at 08:01 UTC.
     fn zuhr_first_nudge() -> DateTime<Utc> {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let date = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
         let day = today::day_times_for(date, &settings).unwrap();
         first_nudge_time(
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn nothing_fires_before_the_first_nudge_offset() {
         let scheduler = Scheduler::default();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let before = zuhr_first_nudge() - Duration::minutes(1);
         assert_eq!(
             scheduler.poll(before, &settings, &PrayerLog::in_memory().unwrap()).unwrap(),
@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn the_first_nudge_fires_once_then_waits_for_its_interval() {
         let scheduler = Scheduler::default();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let first = zuhr_first_nudge();
 
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn restarting_the_app_does_not_repeat_a_reminder() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let first = zuhr_first_nudge();
 
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn logging_the_prayer_stops_the_nudges() {
         let scheduler = Scheduler::default();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let first = zuhr_first_nudge();
         let date = today::display_date(first, &settings).unwrap();
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn sleeping_through_many_nudges_wakes_to_a_single_one() {
         let scheduler = Scheduler::default();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let first = zuhr_first_nudge();
 
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn isha_nudges_stop_at_bedtime() {
         let scheduler = Scheduler::default();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         // 2026-06-15, 23:45 local == 18:45 UTC: inside the Isha window but
         // past the 23:30 bedtime.
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_nudge_close_to_the_window_end_is_marked_ending_soon() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let date = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
         let day = today::day_times_for(date, &settings).unwrap();
         let window = window_for(&day, Prayer::Zuhr);

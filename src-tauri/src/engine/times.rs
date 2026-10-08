@@ -54,6 +54,22 @@ pub fn build_parameters(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrayerCalcError {
     UnsupportedLocation,
+    /// No place has been chosen yet, so there is nothing to calculate from.
+    /// Not a failure so much as a question that has not been answered.
+    LocationUnset,
+}
+
+impl PrayerCalcError {
+    /// Worth saying out loud rather than debug-printing: both of these reach
+    /// the user, and one of them is fixable by them.
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::UnsupportedLocation => {
+                "Prayer times cannot be worked out for this location."
+            }
+            Self::LocationUnset => "No location set yet.",
+        }
+    }
 }
 
 /// Computes a calendar day's prayer times for a location, including the

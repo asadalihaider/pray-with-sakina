@@ -26,6 +26,10 @@ pub struct StatsView {
     pub on_time: Option<u32>,
     /// False for the current month, so the user cannot page into the future.
     pub has_next: bool,
+    /// Today in the user's own timezone, so the grid can tell a day that has
+    /// happened from one that has not without guessing from the browser's
+    /// clock.
+    pub today: String,
 }
 
 #[derive(Serialize)]
@@ -191,6 +195,7 @@ pub fn month_stats(
     });
 
     Ok(StatsView {
+        today: today.to_string(),
         label: format!("{} {}", month_name(month), year),
         year,
         month,
@@ -318,7 +323,7 @@ mod tests {
     #[test]
     fn future_prayers_are_upcoming_rather_than_missed() {
         let log = PrayerLog::in_memory().unwrap();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         // Mid-month: later days have not happened yet.
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
         let view = month_stats(now, &settings, &log, 2026, 6).unwrap();
@@ -333,7 +338,7 @@ mod tests {
     #[test]
     fn mulk_is_tracked_apart_from_the_prayers() {
         let log = PrayerLog::in_memory().unwrap();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
 
         log.set_mulk(NaiveDate::from_ymd_opt(2026, 6, 10).unwrap(), true, now);
@@ -349,7 +354,7 @@ mod tests {
     #[test]
     fn switching_mulk_off_removes_it_from_the_view() {
         let log = PrayerLog::in_memory().unwrap();
-        let mut settings = Settings::default();
+        let mut settings = Settings::for_tests();
         settings.recite_mulk = false;
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
 
@@ -361,7 +366,7 @@ mod tests {
     #[test]
     fn the_mulk_streak_counts_back_over_recited_days() {
         let log = PrayerLog::in_memory().unwrap();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let now = Utc::now();
         let today = today::display_date(now, &settings).unwrap();
 
@@ -375,7 +380,7 @@ mod tests {
     #[test]
     fn a_streak_counts_back_over_fully_prayed_days() {
         let log = PrayerLog::in_memory().unwrap();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let now = Utc::now();
         let today = today::display_date(now, &settings).unwrap();
 

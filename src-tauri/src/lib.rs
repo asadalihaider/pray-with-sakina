@@ -19,7 +19,7 @@ use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewWindow,
 };
 
-use engine::{LoggedStatus, Prayer};
+use engine::{window_for, LoggedStatus, Prayer};
 use scheduler::Scheduler;
 use settings::Settings;
 use store::PrayerLog;
@@ -75,7 +75,7 @@ impl AppState {
 
 #[tauri::command]
 fn get_today(state: tauri::State<AppState>) -> Result<TodayView, String> {
-    today::build_view(Utc::now(), &state.settings.read().unwrap(), &state.log).map_err(|error| format!("{error:?}"))
+    today::build_view(Utc::now(), &state.settings.read().unwrap(), &state.log).map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
@@ -87,17 +87,17 @@ fn log_prayer(
 ) -> Result<TodayView, String> {
     let now = Utc::now();
     let date = today::display_date(now, &state.settings.read().unwrap())
-        .map_err(|error| format!("{error:?}"))?;
+        .map_err(|error| error.message().to_string())?;
     state.log.set(date, prayer, status, now);
 
     refresh_tray_title(&app);
-    today::build_view(now, &state.settings.read().unwrap(), &state.log).map_err(|error| format!("{error:?}"))
+    today::build_view(now, &state.settings.read().unwrap(), &state.log).map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
 fn get_review(state: tauri::State<AppState>) -> Result<Vec<today::ReviewItem>, String> {
     today::pending_review(Utc::now(), &state.settings.read().unwrap(), &state.log)
-        .map_err(|error| format!("{error:?}"))
+        .map_err(|error| error.message().to_string())
 }
 
 /// Logs a prayer from an earlier day, which is how the morning review and
@@ -111,9 +111,41 @@ fn log_past(
     state: tauri::State<AppState>,
 ) -> Result<(), String> {
     let date: chrono::NaiveDate = date.parse().map_err(|_| "unreadable date".to_string())?;
+    let settings = state.settings.read().unwrap();
+    has_begun(Utc::now(), date, prayer, &settings)?;
+    drop(settings);
     state.log.set(date, prayer, status, Utc::now());
     refresh_tray_title(&app);
     Ok(())
+}
+
+/// Refuses a prayer that has not started.
+///
+/// One rule covers a day in the future and today's later prayers alike,
+/// because the window's start is ahead of now in both cases. The month
+/// grid is for correcting the record, and there is nothing yet to correct
+/// about a prayer whose time has not come.
+fn has_begun(
+    now: chrono::DateTime<Utc>,
+    date: chrono::NaiveDate,
+    prayer: Prayer,
+    settings: &Settings,
+) -> Result<(), String> {
+    let day = today::day_times_for(date, settings).map_err(|error| error.message().to_string())?;
+    if now < window_for(&day, prayer).start {
+        return Err("That prayer has not come yet.".to_string());
+    }
+    Ok(())
+}
+
+/// A day that has not arrived in the user's own timezone, which is the only
+/// calendar that matters to someone logging their own habit.
+fn is_future_day(
+    now: chrono::DateTime<Utc>,
+    date: chrono::NaiveDate,
+    settings: &Settings,
+) -> bool {
+    date > now.with_timezone(&settings.timezone()).date_naive()
 }
 
 #[tauri::command]
@@ -448,7 +480,46 @@ fn get_stats(
     state: tauri::State<AppState>,
 ) -> Result<stats::StatsView, String> {
     stats::month_stats(Utc::now(), &state.settings.read().unwrap(), &state.log, year, month)
-        .map_err(|error| format!("{error:?}"))
+        .map_err(|error| error.message().to_string())
+}
+
+/// The version waiting on the releases page, if one is.
+///
+/// There is no in-app nagging: this answers a question the panel asks once
+/// on open, and the panel is what decides whether to mention it.
+#[tauri::command]
+async fn available_update(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(update.version)),
+        Ok(None) => Ok(None),
+        // A machine that is offline, or a release page that is briefly
+        // unreachable, is not something to put on screen.
+        Err(_) => Ok(None),
+    }
+}
+
+/// Downloads the waiting update, installs it, and restarts into it.
+///
+/// Only ever called from a button the user pressed. Nothing updates itself
+/// behind their back, because a reminder app that disappears mid-afternoon
+/// to reinstall itself is a reminder app that missed a prayer.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+        return Err("There is no update waiting.".to_string());
+    };
+
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    app.restart();
 }
 
 #[tauri::command]
@@ -477,6 +548,16 @@ fn log_mulk(
     state: tauri::State<AppState>,
 ) -> Result<(), String> {
     let date: chrono::NaiveDate = date.parse().map_err(|_| "unreadable date".to_string())?;
+    // Mulk has no window, so the only thing to rule out is a day that has
+    // not arrived. Today stays open all day: it is a nightly habit, and
+    // whether it is early or late is not the app's business.
+    let future = {
+        let settings = state.settings.read().unwrap();
+        is_future_day(Utc::now(), date, &settings)
+    };
+    if future {
+        return Err("That day has not come yet.".to_string());
+    }
     state.log.set_mulk(date, recited, Utc::now());
     Ok(())
 }
@@ -484,7 +565,7 @@ fn log_mulk(
 #[tauri::command]
 fn finish_review(state: tauri::State<AppState>) -> Result<(), String> {
     let today = today::display_date(Utc::now(), &state.settings.read().unwrap())
-        .map_err(|error| format!("{error:?}"))?;
+        .map_err(|error| error.message().to_string())?;
     state.log.mark_reviewed(today);
     Ok(())
 }
@@ -829,11 +910,14 @@ fn toggle_popover(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .invoke_handler(tauri::generate_handler![
+            available_update,
+            install_update,
             get_today,
             log_prayer,
             get_review,
@@ -1019,10 +1103,51 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    /// 2026-06-15 in Gujranwala: Fajr is well past by mid-afternoon and
+    /// Isha has not arrived, so one fixed instant exercises both answers.
+    fn mid_afternoon() -> chrono::DateTime<Utc> {
+        "2026-06-15T11:00:00Z".parse().expect("a valid instant")
+    }
+
+    #[test]
+    fn a_prayer_still_to_come_cannot_be_logged() {
+        let settings = Settings::for_tests();
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+
+        // Isha is hours away, and the month grid is for correcting the
+        // record rather than predicting it.
+        assert!(has_begun(mid_afternoon(), date, Prayer::Isha, &settings).is_err());
+    }
+
+    #[test]
+    fn a_prayer_whose_time_has_passed_can_be_logged() {
+        let settings = Settings::for_tests();
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+
+        assert!(has_begun(mid_afternoon(), date, Prayer::Fajr, &settings).is_ok());
+    }
+
+    #[test]
+    fn a_day_that_has_not_arrived_cannot_be_logged() {
+        let settings = Settings::for_tests();
+        let now = mid_afternoon();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+
+        assert!(!is_future_day(now, today, &settings), "today is loggable");
+        assert!(
+            !is_future_day(now, today - chrono::Duration::days(1), &settings),
+            "and so is yesterday"
+        );
+        assert!(
+            is_future_day(now, today + chrono::Duration::days(1), &settings),
+            "tomorrow is not"
+        );
+    }
+
     #[test]
     fn a_logged_prayer_keeps_its_countdown_in_the_menu_bar() {
         use chrono::Utc;
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let now = Utc::now();
 

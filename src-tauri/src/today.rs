@@ -99,9 +99,13 @@ fn key_for(prayer: Prayer) -> &'static str {
 }
 
 pub fn day_times_for(date: NaiveDate, settings: &Settings) -> Result<DayTimes, PrayerCalcError> {
+    let place = settings
+        .location
+        .as_ref()
+        .ok_or(PrayerCalcError::LocationUnset)?;
     compute_day_times(
         date,
-        Coordinates::new(settings.latitude, settings.longitude),
+        Coordinates::new(place.latitude, place.longitude),
         build_parameters(
             settings.salah_method(),
             settings.salah_madhab(),
@@ -174,7 +178,7 @@ pub fn build_view(
     Ok(TodayView {
         now: now.to_rfc3339(),
         date: date.to_string(),
-        timezone: settings.timezone.clone(),
+        timezone: settings.timezone().name().to_string(),
         footer: settings.footer(),
         focus,
         rows,
@@ -241,7 +245,7 @@ mod tests {
         // On an empty database that is all of them — so a brand new user was
         // greeted by "35 prayers unlogged" for days that predate the app.
         let log = PrayerLog::in_memory().unwrap();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let now = Utc.with_ymd_and_hms(2026, 9, 23, 9, 0, 0).unwrap();
 
         // `first_run` is today, so there is no history to answer for.
@@ -253,7 +257,7 @@ mod tests {
         // A restore moves the floor back, so genuinely unlogged days within
         // the history that arrived are still worth asking about.
         let log = PrayerLog::in_memory().unwrap();
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let now = Utc.with_ymd_and_hms(2026, 9, 23, 9, 0, 0).unwrap();
 
         log.set(
@@ -275,7 +279,7 @@ mod tests {
 
     #[test]
     fn before_fajr_still_shows_yesterdays_list() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         // 01:00 local in Gujranwala (UTC+5) == 20:00 UTC the previous day,
         // well inside the previous day's Isha window.
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 20, 0, 0).unwrap();
@@ -289,7 +293,7 @@ mod tests {
 
     #[test]
     fn sunrise_to_zuhr_gap_focuses_the_next_prayer() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         // 09:00 local == 04:00 UTC: after sunrise, before Zuhr.
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 4, 0, 0).unwrap();
         let view = build_view(now, &settings, &PrayerLog::in_memory().unwrap()).unwrap();
@@ -302,7 +306,7 @@ mod tests {
 
     #[test]
     fn logging_a_prayer_shows_up_in_the_row_and_focus() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         // 13:30 local == 08:30 UTC, inside the Zuhr window.
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
         let log = PrayerLog::in_memory().unwrap();
@@ -317,7 +321,7 @@ mod tests {
 
     #[test]
     fn the_mulk_row_reflects_the_day_being_shown() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
         let date = display_date(now, &settings).unwrap();
@@ -332,7 +336,7 @@ mod tests {
 
     #[test]
     fn switching_mulk_off_drops_it_from_today() {
-        let mut settings = Settings::default();
+        let mut settings = Settings::for_tests();
         settings.recite_mulk = false;
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
         let view = build_view(now, &settings, &PrayerLog::in_memory().unwrap()).unwrap();
@@ -349,7 +353,7 @@ mod tests {
 
     #[test]
     fn rows_cover_all_five_prayers_plus_sunrise_in_order() {
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
         let view = build_view(now, &settings, &PrayerLog::in_memory().unwrap()).unwrap();
 

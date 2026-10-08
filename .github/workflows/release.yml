@@ -85,6 +85,11 @@ jobs:
       - name: Build
         env:
           APPLE_SIGNING_IDENTITY: ${{ env.SIGNING_IDENTITY }}
+          # Separate from the Apple certificate and separate in purpose: this
+          # one proves an update came from us, so the app will refuse one it
+          # cannot verify.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target universal-apple-darwin
 
       # Signing silently falling back to ad-hoc would produce a build that
@@ -108,6 +113,40 @@ jobs:
           APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Sakina.app"
           ditto -c -k --sequesterRsrc --keepParent "$APP" Sakina.zip
           shasum -a 256 Sakina.zip | tee checksum.txt
+
+      # The in-app updater reads a manifest, not the release page. It wants
+      # the tarball Tauri produced and the signature beside it; a download
+      # the app cannot verify is one it refuses to install.
+      - name: Build the update manifest
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          BUNDLE="src-tauri/target/universal-apple-darwin/release/bundle/macos"
+          TARBALL="$BUNDLE/Sakina.app.tar.gz"
+          if [ ! -f "$TARBALL" ] || [ ! -f "$TARBALL.sig" ]; then
+            echo "Tauri did not produce a signed updater bundle." >&2
+            ls -la "$BUNDLE" >&2
+            exit 1
+          fi
+          cp "$TARBALL" Sakina.app.tar.gz
+
+          VERSION="${TAG#v}"
+          SIGNATURE=$(cat "$TARBALL.sig")
+          URL="https://github.com/${{ github.repository }}/releases/download/$TAG/Sakina.app.tar.gz"
+
+          # One universal build serves both architectures, so both platform
+          # keys point at the same file.
+          cat > latest.json <<MANIFEST
+          {
+            "version": "$VERSION",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": { "signature": "$SIGNATURE", "url": "$URL" },
+              "darwin-x86_64": { "signature": "$SIGNATURE", "url": "$URL" }
+            }
+          }
+          MANIFEST
+          python3 -c "import json;json.load(open('latest.json'));print('manifest parses')"
 
       - name: Publish the release
         env:
@@ -148,7 +187,7 @@ jobs:
           \`\`\`
           NOTES
 
-          gh release create "$TAG" Sakina.zip \
+          gh release create "$TAG" Sakina.zip Sakina.app.tar.gz latest.json \
             --title "Sakina $TAG" \
             --notes-file notes.md \
             $PRERELEASE

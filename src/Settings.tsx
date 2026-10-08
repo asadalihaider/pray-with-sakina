@@ -8,11 +8,17 @@ type FirstNudge =
   | { kind: "offset_minutes"; minutes: number }
   | { kind: "jamaat_time"; hour: number; minute: number };
 
-export type SettingsData = {
-  locationName: string;
+/// Null until the user picks one. Prayer times cannot be guessed, so
+/// nothing is shown before a place is set.
+export type StoredPlace = {
+  name: string;
   latitude: number;
   longitude: number;
   timezone: string;
+};
+
+export type SettingsData = {
+  location: StoredPlace | null;
   method: string;
   madhab: "hanafi" | "shafi";
   adjustments: Record<string, number>;

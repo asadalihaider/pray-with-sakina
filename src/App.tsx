@@ -185,6 +185,16 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [changingPlace, setChangingPlace] = useState(false);
 
+  // A version waiting on the releases page. Asked once when the panel
+  // opens; nothing polls, and nothing installs itself.
+  const [update, setUpdate] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+
+  // Onboarding is finished and a place is set. Without the second half
+  // there is nothing to calculate from, so the only screen worth showing
+  // is the one that asks for it.
+  const configured = Boolean(settings?.onboarded && settings.location);
+
   // The web view follows the system by default; an explicit choice overrides
   // it through a data attribute the stylesheet keys off.
   const applyTheme = useCallback(async () => {
@@ -230,6 +240,12 @@ export default function App() {
   }, [loadReview]);
 
   useEffect(() => {
+    invoke<string | null>("available_update")
+      .then(setUpdate)
+      .catch(() => setUpdate(null));
+  }, []);
+
+  useEffect(() => {
     refresh();
     const timer = setInterval(refresh, REFRESH_MS);
     window.addEventListener("focus", refresh);
@@ -269,10 +285,12 @@ export default function App() {
       if (!settings) return;
       const next = {
         ...settings,
-        locationName: place.name,
-        latitude: place.latitude,
-        longitude: place.longitude,
-        timezone: place.timezone,
+        location: {
+          name: place.name,
+          latitude: place.latitude,
+          longitude: place.longitude,
+          timezone: place.timezone,
+        },
       };
       await invoke("save_settings", { settings: next });
       setSettings(next);
@@ -294,15 +312,40 @@ export default function App() {
       style={{ ["--accent" as string]: accent }}
       data-tauri-drag-region="deep"
     >
-      {error && (
+      {error && !changingPlace && (
         <div className="error">
-          Prayer times are unavailable for this location.
-          <br />
-          {error}
+          <span>{error}</span>
+          {/* Without this the screen is a dead end: the one thing that can
+              fix an uncalculable location is changing it, and every other
+              route to the location panel is behind the view that just
+              failed to build. */}
+          <button className="onboard-ask" onClick={() => setChangingPlace(true)}>
+            Change location
+          </button>
         </div>
       )}
 
-      {!error && settings && !settings.onboarded && (
+      {configured && update && !review && (
+        <div className="update-banner">
+          <span>Version {update} is ready.</span>
+          <button
+            disabled={updating}
+            onClick={async () => {
+              setUpdating(true);
+              try {
+                await invoke("install_update");
+              } catch (problem) {
+                setError(String(problem));
+                setUpdating(false);
+              }
+            }}
+          >
+            {updating ? "Updating…" : "Update and restart"}
+          </button>
+        </div>
+      )}
+
+      {!error && settings && !configured && (
         <Onboarding
           settings={settings}
           onDone={() => {
@@ -313,7 +356,7 @@ export default function App() {
         />
       )}
 
-      {!error && settings?.onboarded && view && review && (
+      {!error && configured && view && review && (
         <Review
           items={review}
           onLater={() => setReview(null)}
@@ -324,7 +367,7 @@ export default function App() {
         />
       )}
 
-      {!error && settings?.onboarded && view && !review && !changingPlace && tab === "today" && (
+      {!error && configured && view && !review && !changingPlace && tab === "today" && (
         <div className="tab-body">
           <div className="home-head">
             <button
@@ -332,7 +375,7 @@ export default function App() {
               onClick={() => setChangingPlace(true)}
               title="Change location"
             >
-              {settings.locationName}
+              {settings?.location?.name ?? "Set a location"}
             </button>
           </div>
           <Ring view={view} />
@@ -360,7 +403,7 @@ export default function App() {
         </div>
       )}
 
-      {!error && settings?.onboarded && !review && changingPlace && tab === "today" && (
+      {configured && !review && changingPlace && tab === "today" && (
         <div className="tab-body place-panel">
           <div className="panel-head">
             <button className="back-arrow" onClick={() => setChangingPlace(false)}>
@@ -369,23 +412,25 @@ export default function App() {
             <span className="panel-title">Location</span>
           </div>
           <div className="row">
-            <span className="row-label">{settings.locationName}</span>
-            <span className="row-value">{settings.timezone}</span>
+            <span className="row-label">
+              {settings?.location?.name ?? "No location set"}
+            </span>
+            <span className="row-value">{settings?.location?.timezone ?? ""}</span>
           </div>
           <CitySearch onPick={changePlace} />
         </div>
       )}
 
-      {!error && settings?.onboarded && !review && tab === "stats" && <Stats />}
-      {!error && settings?.onboarded && !review && tab === "qaza" && <Qaza />}
+      {!error && configured && !review && tab === "stats" && <Stats />}
+      {!error && configured && !review && tab === "qaza" && <Qaza />}
 
-      {!error && settings?.onboarded && !review && tab === "settings" && (
+      {!error && configured && !review && tab === "settings" && (
         <Settings onSaved={() => { refresh(); applyTheme(); }} />
       )}
 
-      {settings?.onboarded && <div className="footer">{view?.footer ?? " "}</div>}
+      {configured && <div className="footer">{view?.footer ?? " "}</div>}
 
-      {settings?.onboarded && (
+      {configured && (
       <nav className="tabbar">
         {(["today", "stats", "qaza", "settings"] as Tab[]).map((name) => (
           <button
