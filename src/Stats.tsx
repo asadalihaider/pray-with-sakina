@@ -20,6 +20,7 @@ type StatsView = {
   mulkStreak: number | null;
   onTime: number | null;
   hasNext: boolean;
+  today: string;
 };
 
 /// `prayer` is null for the Surah Mulk row, which is logged through its own
@@ -53,6 +54,9 @@ export default function Stats() {
   const [view, setView] = useState<StatsView | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Selection | null>(null);
+  // The grid disables what cannot be logged, so this only surfaces if the
+  // backend refuses something the grid thought was fine.
+  const [refused, setRefused] = useState<string | null>(null);
 
   const load = useCallback(async (monthOffset: number) => {
     const now = new Date();
@@ -103,18 +107,24 @@ export default function Stats() {
 
   const edit = async (status: "prayed" | "missed") => {
     if (!selected) return;
-    if (selected.prayer === null) {
-      await invoke("log_mulk", {
-        date: selected.date,
-        recited: status === "prayed",
-      });
-    } else {
-      await invoke("log_past", {
-        date: selected.date,
-        prayer: selected.prayer,
-        status,
-      });
+    try {
+      if (selected.prayer === null) {
+        await invoke("log_mulk", {
+          date: selected.date,
+          recited: status === "prayed",
+        });
+      } else {
+        await invoke("log_past", {
+          date: selected.date,
+          prayer: selected.prayer,
+          status,
+        });
+      }
+    } catch (problem) {
+      setRefused(String(problem));
+      return;
     }
+    setRefused(null);
     const refreshed = await load(offset);
     setSelected(nextUnlogged(refreshed, selected.day, selected.row));
   };
@@ -188,6 +198,7 @@ export default function Stats() {
                 }`}
                 style={{ gridColumn: day.day + 1, gridRow: PRAYERS.length + 1 }}
                 title={`${day.date} · Surah Mulk`}
+                disabled={day.date > view.today}
                 onClick={() =>
                   setSelected({
                     date: day.date,
@@ -208,6 +219,7 @@ export default function Stats() {
                 }`}
                 style={{ gridColumn: day.day + 1, gridRow: row + 1 }}
                 title={`${day.date} · ${PRAYERS[row]}`}
+                disabled={status === "upcoming"}
                 onClick={() =>
                   setSelected({
                     date: day.date,
@@ -252,6 +264,8 @@ export default function Stats() {
           </div>
         ))}
       </div>
+
+      {refused && <div className="row-note">{refused}</div>}
 
       {selected && (
         <div className="cell-editor">

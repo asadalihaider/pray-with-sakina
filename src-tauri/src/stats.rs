@@ -26,6 +26,10 @@ pub struct StatsView {
     pub on_time: Option<u32>,
     /// False for the current month, so the user cannot page into the future.
     pub has_next: bool,
+    /// Today in the user's own timezone, so the grid can tell a day that has
+    /// happened from one that has not without guessing from the browser's
+    /// clock.
+    pub today: String,
 }
 
 #[derive(Serialize)]
@@ -191,6 +195,7 @@ pub fn month_stats(
     });
 
     Ok(StatsView {
+        today: today.to_string(),
         label: format!("{} {}", month_name(month), year),
         year,
         month,
