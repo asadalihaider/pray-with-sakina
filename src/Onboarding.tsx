@@ -92,6 +92,14 @@ export default function Onboarding({
   const remindersReady =
     reminders?.permission === "granted" && reminders?.style === "persistent";
 
+  // System Settings is only the right destination when macOS is holding an
+  // answer that has to be changed there. With everything already set, a
+  // button to go and fix it contradicts the line above saying there is
+  // nothing to fix — and while the dialog can still be raised, the dialog
+  // is the better tool.
+  const settingsWouldHelp =
+    reminders != null && reminders.permission !== "unasked" && !remindersReady;
+
   const choose = (place: Place) =>
     setDraft({
       ...draft,
@@ -224,12 +232,14 @@ export default function Onboarding({
               until you dismiss them yourself.
             </div>
           )}
-          <button
-            className="onboard-settings"
-            onClick={() => invoke("open_notification_settings")}
-          >
-            Open your Mac settings
-          </button>
+          {settingsWouldHelp && (
+            <button
+              className="onboard-settings"
+              onClick={() => invoke("open_notification_settings")}
+            >
+              Open your Mac settings
+            </button>
+          )}
         </div>
       )}
 
