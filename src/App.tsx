@@ -301,11 +301,16 @@ export default function App() {
       style={{ ["--accent" as string]: accent }}
       data-tauri-drag-region="deep"
     >
-      {error && (
+      {error && !changingPlace && (
         <div className="error">
-          Prayer times are unavailable for this location.
-          <br />
-          {error}
+          <span>{error}</span>
+          {/* Without this the screen is a dead end: the one thing that can
+              fix an uncalculable location is changing it, and every other
+              route to the location panel is behind the view that just
+              failed to build. */}
+          <button className="onboard-ask" onClick={() => setChangingPlace(true)}>
+            Change location
+          </button>
         </div>
       )}
 
@@ -367,7 +372,7 @@ export default function App() {
         </div>
       )}
 
-      {!error && configured && !review && changingPlace && tab === "today" && (
+      {configured && !review && changingPlace && tab === "today" && (
         <div className="tab-body place-panel">
           <div className="panel-head">
             <button className="back-arrow" onClick={() => setChangingPlace(false)}>
