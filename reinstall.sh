@@ -28,8 +28,24 @@ echo "==> quitting"
 pkill -f "Sakina.app" 2>/dev/null || true
 sleep 1
 
+# Releases carry an updater signature, so the bundler insists on a key even
+# for a throwaway local build. A contributor has no business holding the real
+# one, so make them a local key once and use that: nothing will ever check an
+# update signed with it.
+UPDATER_KEY="release/updater.key"
+if [ ! -f "$UPDATER_KEY" ]; then
+  echo "==> generating a local updater key (release/updater.key)"
+  mkdir -p release
+  openssl rand -base64 18 | tr -d '\n' > release/updater-password.txt
+  npm run tauri -- signer generate \
+    -w "$UPDATER_KEY" -p "$(cat release/updater-password.txt)" >/dev/null
+fi
+
 echo "==> building"
-APPLE_SIGNING_IDENTITY="$IDENTITY" npm run tauri build
+APPLE_SIGNING_IDENTITY="$IDENTITY" \
+TAURI_SIGNING_PRIVATE_KEY="$(cat "$UPDATER_KEY")" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat release/updater-password.txt)" \
+  npm run tauri build
 
 echo "==> replacing $APP"
 rm -rf "$APP"
