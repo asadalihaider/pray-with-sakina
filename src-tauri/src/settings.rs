@@ -102,6 +102,25 @@ pub struct NudgeSetting {
     pub first_nudge: FirstNudge,
 }
 
+/// Where the user is, and the one setting with no sensible default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Place {
+    pub name: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    /// IANA name. Stored as text because chrono-tz's own type is not
+    /// serialisable without an extra feature, and text is what a user's
+    /// location lookup returns anyway.
+    pub timezone: String,
+}
+
+impl Place {
+    pub fn timezone(&self) -> Tz {
+        self.timezone.parse().unwrap_or(chrono_tz::UTC)
+    }
+}
+
 /// Everything the app reads, and the single flat object the front end sees.
 ///
 /// This was once two structs — one that followed the person between
@@ -116,13 +135,10 @@ pub struct Settings {
     /// Surah Mulk is commonly recited nightly. Tracked as a daily habit, not
     /// a prayer: it has no window and never counts toward Qaza.
     pub recite_mulk: bool,
-    pub location_name: String,
-    pub latitude: f64,
-    pub longitude: f64,
-    /// IANA name. Stored as text because chrono-tz's own type is not
-    /// serialisable without an extra feature, and text is what a user's
-    /// location lookup returns anyway.
-    pub timezone: String,
+    /// None until the user chooses. Prayer times cannot be guessed: a
+    /// default city would show confident, wrong times that look exactly
+    /// like right ones, so nothing is calculated before a place is set.
+    pub location: Option<Place>,
     pub adjustments: PrayerAdjustments,
     pub first_nudge: Vec<NudgeSetting>,
     /// Friday's Zuhr keeps its own jamaat time.
@@ -143,10 +159,7 @@ impl Default for Settings {
             method: CalcMethod::Karachi,
             madhab: AsrMadhab::Hanafi,
             recite_mulk: true,
-            location_name: "Gujranwala".to_string(),
-            latitude: 32.1877,
-            longitude: 74.1945,
-            timezone: "Asia/Karachi".to_string(),
+            location: None,
             adjustments: PrayerAdjustments::default(),
             first_nudge: default_nudges(),
             jumuah: None,
@@ -174,7 +187,8 @@ const DEVICE_KEY: &str = "device_settings";
 /// Both old keys are left in place afterwards, frozen, so rolling back to
 /// an older build still finds something sane.
 pub fn load(log: &PrayerLog) -> Settings {
-    if let Some(settings) = log.load_json::<Settings>(SETTINGS_KEY) {
+    if let Some(stored) = log.load_json::<serde_json::Value>(SETTINGS_KEY) {
+        let settings = folded(stored);
         // Written straight back, which rewrites the stored JSON through the
         // current struct and so drops any setting that has since been
         // removed. A dropped setting is already inert — reading it into the
@@ -185,7 +199,7 @@ pub fn load(log: &PrayerLog) -> Settings {
         return settings;
     }
 
-    let settings = from_split_keys(log).unwrap_or_default();
+    let settings = from_split_keys(log).map(folded).unwrap_or_default();
     save(log, &settings);
     settings
 }
@@ -194,7 +208,7 @@ pub fn load(log: &PrayerLog) -> Settings {
 ///
 /// The account half was nested inside a record carrying its own timestamp
 /// and originating device; only the settings within it still mean anything.
-fn from_split_keys(log: &PrayerLog) -> Option<Settings> {
+fn from_split_keys(log: &PrayerLog) -> Option<serde_json::Value> {
     use serde_json::Value;
 
     let account: Option<Value> = log.load_json(ACCOUNT_KEY);
@@ -213,7 +227,41 @@ fn from_split_keys(log: &PrayerLog) -> Option<Settings> {
             flat.extend(fields);
         }
     }
-    serde_json::from_value(Value::Object(flat)).ok()
+    Some(Value::Object(flat))
+}
+
+/// Folds a stored object into the current struct, carrying a place written
+/// by an older build with it.
+///
+/// Until v0.1.1 the place was four flat keys rather than one nested object.
+/// Reaching straight for `location` would leave an existing user with no
+/// place at all and send them back through onboarding.
+fn folded(stored: serde_json::Value) -> Settings {
+    use serde_json::Value;
+
+    let mut stored = stored;
+    if let Value::Object(fields) = &mut stored {
+        if !fields.contains_key("location") {
+            let name = fields.get("locationName").and_then(Value::as_str);
+            let latitude = fields.get("latitude").and_then(Value::as_f64);
+            let longitude = fields.get("longitude").and_then(Value::as_f64);
+            let timezone = fields.get("timezone").and_then(Value::as_str);
+            if let (Some(name), Some(latitude), Some(longitude), Some(timezone)) =
+                (name, latitude, longitude, timezone)
+            {
+                let place = Place {
+                    name: name.to_string(),
+                    latitude,
+                    longitude,
+                    timezone: timezone.to_string(),
+                };
+                if let Ok(place) = serde_json::to_value(place) {
+                    fields.insert("location".to_string(), place);
+                }
+            }
+        }
+    }
+    serde_json::from_value(stored).unwrap_or_default()
 }
 
 pub fn save(log: &PrayerLog, settings: &Settings) {
@@ -238,8 +286,13 @@ fn default_nudges() -> Vec<NudgeSetting> {
 }
 
 impl Settings {
+    /// UTC while no place is set. Nothing is scheduled or calculated in that
+    /// state, so this only keeps the bedtime arithmetic total.
     pub fn timezone(&self) -> Tz {
-        self.timezone.parse().unwrap_or(chrono_tz::UTC)
+        self.location
+            .as_ref()
+            .map(Place::timezone)
+            .unwrap_or(chrono_tz::UTC)
     }
 
     pub fn salah_method(&self) -> Method {
@@ -269,14 +322,37 @@ impl Settings {
             .unwrap_or(FirstNudge::OffsetMinutes { minutes: 30 })
     }
 
-    /// The popover's footer line, e.g. "Karachi · Hanafi · Gujranwala".
+    /// The popover's footer line, e.g. "Karachi · Hanafi · Lahore".
     pub fn footer(&self) -> String {
         format!(
             "{} · {} · {}",
             self.method.short_label(),
             self.madhab.label(),
-            self.location_name
+            self.location
+                .as_ref()
+                .map(|place| place.name.as_str())
+                .unwrap_or("No location")
         )
+    }
+}
+
+/// A settled place, so a test about nudge timing or the month grid does not
+/// have to spell one out.
+///
+/// Gujranwala because the time assertions throughout the crate were written
+/// against its sunrise, and moving them would change what they prove.
+#[cfg(test)]
+impl Settings {
+    pub fn for_tests() -> Self {
+        Self {
+            location: Some(Place {
+                name: "Gujranwala".to_string(),
+                latitude: 32.1877,
+                longitude: 74.1945,
+                timezone: "Asia/Karachi".to_string(),
+            }),
+            ..Self::default()
+        }
     }
 }
 
@@ -312,9 +388,45 @@ mod tests {
 
     #[test]
     fn an_unreadable_timezone_falls_back_rather_than_panicking() {
-        let mut settings = Settings::default();
-        settings.timezone = "Not/AZone".to_string();
+        let mut settings = Settings::for_tests();
+        settings.location.as_mut().unwrap().timezone = "Not/AZone".to_string();
         assert_eq!(settings.timezone(), chrono_tz::UTC);
+    }
+
+    #[test]
+    fn a_place_stored_as_flat_keys_is_folded_into_one() {
+        // What v0.1.0 wrote. Reaching straight for `location` would leave an
+        // existing user with no place and send them back through onboarding.
+        let log = PrayerLog::in_memory().unwrap();
+        log.save_json(
+            SETTINGS_KEY,
+            &serde_json::json!({
+                "method": "karachi",
+                "locationName": "Lahore",
+                "latitude": 31.5204,
+                "longitude": 74.3587,
+                "timezone": "Asia/Karachi",
+                "onboarded": true
+            }),
+        );
+
+        let loaded = load(&log);
+        let place = loaded.location.expect("the place survived the upgrade");
+        assert_eq!(place.name, "Lahore");
+        assert_eq!(place.timezone, "Asia/Karachi");
+        assert!(loaded.onboarded, "and the user is not asked again");
+
+        // Rewritten in the current shape, so the bytes on disk agree with
+        // what the app believes.
+        let raw: serde_json::Value = log.load_json(SETTINGS_KEY).unwrap();
+        assert_eq!(raw["location"]["name"], "Lahore");
+    }
+
+    #[test]
+    fn a_place_nobody_chose_is_no_place_at_all() {
+        // The one setting with no honest default. A city here would show
+        // confident, wrong prayer times to everyone who skipped past it.
+        assert_eq!(Settings::default().location, None);
     }
 
     #[test]
@@ -322,7 +434,7 @@ mod tests {
         let settings = Settings::default();
         let text = serde_json::to_string(&settings).unwrap();
         let back: Settings = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.location_name, settings.location_name);
+        assert_eq!(back.location, settings.location);
         assert_eq!(back.method, settings.method);
         assert_eq!(back.first_nudge.len(), 5);
     }
@@ -330,17 +442,19 @@ mod tests {
     #[test]
     fn settings_are_one_flat_object_on_the_wire() {
         // The front end has a single settings screen and a single object.
-        let text = serde_json::to_string(&Settings::default()).unwrap();
+        let text = serde_json::to_string(&Settings::for_tests()).unwrap();
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(json["method"], "karachi");
-        assert_eq!(json["locationName"], "Gujranwala");
+        assert_eq!(json["location"]["name"], "Gujranwala");
     }
 
     #[test]
     fn missing_fields_fall_back_to_defaults() {
         // An older settings blob, from before a field existed, must still load.
-        let back: Settings = serde_json::from_str("{\"locationName\":\"Lahore\"}").unwrap();
-        assert_eq!(back.location_name, "Lahore");
+        let back: Settings =
+            serde_json::from_str("{\"location\":{\"name\":\"Lahore\",\"latitude\":31.5,\"longitude\":74.3,\"timezone\":\"Asia/Karachi\"}}")
+                .unwrap();
+        assert_eq!(back.location.unwrap().name, "Lahore");
         assert_eq!(back.method, CalcMethod::Karachi);
         assert_eq!(back.bedtime_hour, 23);
     }
@@ -379,7 +493,13 @@ mod tests {
         );
         log.save_json(
             DEVICE_KEY,
-            &serde_json::json!({ "locationName": "Lahore", "bedtimeHour": 22 }),
+            &serde_json::json!({
+                "locationName": "Lahore",
+                "latitude": 31.5204,
+                "longitude": 74.3587,
+                "timezone": "Asia/Karachi",
+                "bedtimeHour": 22
+            }),
         );
 
         let loaded = load(&log);
@@ -387,7 +507,7 @@ mod tests {
         // leak in as a setting.
         assert_eq!(loaded.madhab, AsrMadhab::Shafi);
         assert!(!loaded.recite_mulk);
-        assert_eq!(loaded.location_name, "Lahore");
+        assert_eq!(loaded.location.unwrap().name, "Lahore");
         assert_eq!(loaded.bedtime_hour, 22);
 
         // One key from now on.
@@ -404,11 +524,16 @@ mod tests {
         let log = PrayerLog::in_memory().unwrap();
         log.save_json(
             DEVICE_KEY,
-            &serde_json::json!({ "locationName": "Karachi" }),
+            &serde_json::json!({
+                "locationName": "Karachi",
+                "latitude": 24.8607,
+                "longitude": 67.0011,
+                "timezone": "Asia/Karachi"
+            }),
         );
 
         let loaded = load(&log);
-        assert_eq!(loaded.location_name, "Karachi");
+        assert_eq!(loaded.location.unwrap().name, "Karachi");
         assert_eq!(loaded.madhab, AsrMadhab::Hanafi);
     }
 
@@ -452,11 +577,12 @@ mod tests {
         // And again, now reading the split keys rather than migrating.
         let loaded = load(&log);
 
-        assert_eq!(first.latitude, loaded.latitude);
-        assert_eq!(loaded.location_name, "Gujranwala");
-        assert_eq!(loaded.latitude, 32.19265558539923);
-        assert_eq!(loaded.longitude, 74.17256787793612);
-        assert_eq!(loaded.timezone, "Asia/Karachi");
+        assert_eq!(first.location, loaded.location);
+        let place = loaded.location.clone().expect("the stored place survived");
+        assert_eq!(place.name, "Gujranwala");
+        assert_eq!(place.latitude, 32.19265558539923);
+        assert_eq!(place.longitude, 74.17256787793612);
+        assert_eq!(place.timezone, "Asia/Karachi");
         assert_eq!(loaded.method, CalcMethod::Karachi);
         assert_eq!(loaded.madhab, AsrMadhab::Hanafi);
         assert_eq!(loaded.recite_mulk, true);
@@ -495,11 +621,19 @@ mod tests {
                 "deviceId": "an-older-device"
             }),
         );
-        log.save_json(DEVICE_KEY, &serde_json::json!({ "locationName": "Lahore" }));
+        log.save_json(
+            DEVICE_KEY,
+            &serde_json::json!({
+                "locationName": "Lahore",
+                "latitude": 31.5204,
+                "longitude": 74.3587,
+                "timezone": "Asia/Karachi"
+            }),
+        );
 
         let loaded = load(&log);
         assert_eq!(loaded.madhab, AsrMadhab::Shafi);
-        assert_eq!(loaded.location_name, "Lahore");
+        assert_eq!(loaded.location.clone().unwrap().name, "Lahore");
 
         let raw: serde_json::Value = log.load_json(SETTINGS_KEY).unwrap();
         assert!(!raw.to_string().contains("countWitr"), "stale setting kept");

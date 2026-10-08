@@ -48,8 +48,9 @@ export default function Onboarding({
   const [sendError, setSendError] = useState<string | null>(null);
   const [reminders, setReminders] = useState<Reminders | null>(null);
 
-  // Everything here has a working default, so leaving at any point has to
-  // be a complete exit rather than a half-configured state.
+  // Every other step has a working default, so leaving is a complete exit
+  // rather than a half-configured state. The place is the exception: there
+  // is no honest default for it, so step one cannot be left behind.
   const finish = async () => {
     await invoke("save_settings", {
       settings: { ...draft, onboarded: true },
@@ -94,10 +95,12 @@ export default function Onboarding({
   const choose = (place: Place) =>
     setDraft({
       ...draft,
-      locationName: place.name,
-      latitude: place.latitude,
-      longitude: place.longitude,
-      timezone: place.timezone,
+      location: {
+        name: place.name,
+        latitude: place.latitude,
+        longitude: place.longitude,
+        timezone: place.timezone,
+      },
     });
 
   return (
@@ -116,7 +119,9 @@ export default function Onboarding({
             anywhere except the city name you search for.
           </div>
           <CitySearch onPick={choose} onBusy={setLocating} />
-          <div className="onboard-current">{draft.locationName}</div>
+          {draft.location && (
+            <div className="onboard-current">{draft.location.name}</div>
+          )}
         </div>
       )}
 
@@ -254,14 +259,21 @@ export default function Onboarding({
       )}
 
       <div className="onboard-actions">
-        <button className="onboard-skip" onClick={finish} disabled={locating}>
+        {/* Nothing can be skipped past until there is a place to calculate
+            from — the alternative is an app showing confident, wrong times
+            for somewhere the user has never been. */}
+        <button
+          className="onboard-skip"
+          onClick={finish}
+          disabled={locating || !draft.location}
+        >
           Skip
         </button>
         {step < 3 ? (
           <button
             className="onboard-next"
             onClick={() => setStep(step + 1)}
-            disabled={locating}
+            disabled={locating || !draft.location}
           >
             {/* On the notifications screen the forward button is a
                 refusal rather than a confirmation — unless macOS says it

@@ -75,7 +75,7 @@ impl AppState {
 
 #[tauri::command]
 fn get_today(state: tauri::State<AppState>) -> Result<TodayView, String> {
-    today::build_view(Utc::now(), &state.settings.read().unwrap(), &state.log).map_err(|error| format!("{error:?}"))
+    today::build_view(Utc::now(), &state.settings.read().unwrap(), &state.log).map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
@@ -87,17 +87,17 @@ fn log_prayer(
 ) -> Result<TodayView, String> {
     let now = Utc::now();
     let date = today::display_date(now, &state.settings.read().unwrap())
-        .map_err(|error| format!("{error:?}"))?;
+        .map_err(|error| error.message().to_string())?;
     state.log.set(date, prayer, status, now);
 
     refresh_tray_title(&app);
-    today::build_view(now, &state.settings.read().unwrap(), &state.log).map_err(|error| format!("{error:?}"))
+    today::build_view(now, &state.settings.read().unwrap(), &state.log).map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
 fn get_review(state: tauri::State<AppState>) -> Result<Vec<today::ReviewItem>, String> {
     today::pending_review(Utc::now(), &state.settings.read().unwrap(), &state.log)
-        .map_err(|error| format!("{error:?}"))
+        .map_err(|error| error.message().to_string())
 }
 
 /// Logs a prayer from an earlier day, which is how the morning review and
@@ -448,7 +448,7 @@ fn get_stats(
     state: tauri::State<AppState>,
 ) -> Result<stats::StatsView, String> {
     stats::month_stats(Utc::now(), &state.settings.read().unwrap(), &state.log, year, month)
-        .map_err(|error| format!("{error:?}"))
+        .map_err(|error| error.message().to_string())
 }
 
 #[tauri::command]
@@ -484,7 +484,7 @@ fn log_mulk(
 #[tauri::command]
 fn finish_review(state: tauri::State<AppState>) -> Result<(), String> {
     let today = today::display_date(Utc::now(), &state.settings.read().unwrap())
-        .map_err(|error| format!("{error:?}"))?;
+        .map_err(|error| error.message().to_string())?;
     state.log.mark_reviewed(today);
     Ok(())
 }
@@ -1022,7 +1022,7 @@ mod tests {
     #[test]
     fn a_logged_prayer_keeps_its_countdown_in_the_menu_bar() {
         use chrono::Utc;
-        let settings = Settings::default();
+        let settings = Settings::for_tests();
         let log = PrayerLog::in_memory().unwrap();
         let now = Utc::now();
 
