@@ -185,6 +185,11 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [changingPlace, setChangingPlace] = useState(false);
 
+  // A version waiting on the releases page. Asked once when the panel
+  // opens; nothing polls, and nothing installs itself.
+  const [update, setUpdate] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+
   // Onboarding is finished and a place is set. Without the second half
   // there is nothing to calculate from, so the only screen worth showing
   // is the one that asks for it.
@@ -233,6 +238,12 @@ export default function App() {
   useEffect(() => {
     loadReview();
   }, [loadReview]);
+
+  useEffect(() => {
+    invoke<string | null>("available_update")
+      .then(setUpdate)
+      .catch(() => setUpdate(null));
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -310,6 +321,26 @@ export default function App() {
               failed to build. */}
           <button className="onboard-ask" onClick={() => setChangingPlace(true)}>
             Change location
+          </button>
+        </div>
+      )}
+
+      {configured && update && !review && (
+        <div className="update-banner">
+          <span>Version {update} is ready.</span>
+          <button
+            disabled={updating}
+            onClick={async () => {
+              setUpdating(true);
+              try {
+                await invoke("install_update");
+              } catch (problem) {
+                setError(String(problem));
+                setUpdating(false);
+              }
+            }}
+          >
+            {updating ? "Updating…" : "Update and restart"}
           </button>
         </div>
       )}

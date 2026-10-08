@@ -1210,3 +1210,24 @@ body {
 .linky:hover {
   color: var(--text);
 }
+
+/* A waiting version, mentioned once when the panel opens. Deliberately a
+   strip rather than a dialog: an update is worth knowing about, not worth
+   interrupting a prayer log for. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 14px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.update-banner button {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 12px;
+}

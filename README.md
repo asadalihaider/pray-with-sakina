@@ -66,6 +66,17 @@ file you installed makes quietly on your behalf.
 
 Upgrading later is `brew upgrade --cask sakina`.
 
+### Updates
+
+Sakina checks the releases page when you open the panel, and says so with a
+strip across the top if a newer version is waiting. Pressing **Update and
+restart** downloads it, verifies it against a signing key built into the app,
+and relaunches.
+
+Nothing happens on its own: no polling, no background install, no update that
+takes the app away mid-afternoon and misses a prayer. If the check fails
+because the Mac is offline, it says nothing rather than complaining.
+
 ### First run
 
 Sakina asks for two permissions, and explains itself before each:
@@ -155,6 +166,12 @@ macOS keys both permissions to the bundle identifier **and** the signing
 certificate, so a build signed with a different certificate is a different app
 as far as the system is concerned: permissions reset and the prompts return.
 Releases are therefore always signed with the same certificate.
+
+Updates carry a **second, unrelated signature** — Tauri's own, nothing to do
+with Apple — which is what lets the app refuse an update it cannot verify.
+Both keys are a release's whole identity: lose the certificate and every user
+re-grants their permissions, lose the updater key and no further update can be
+installed by anyone already running the app.
 
 ## How it is put together
 

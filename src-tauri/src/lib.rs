@@ -483,6 +483,45 @@ fn get_stats(
         .map_err(|error| error.message().to_string())
 }
 
+/// The version waiting on the releases page, if one is.
+///
+/// There is no in-app nagging: this answers a question the panel asks once
+/// on open, and the panel is what decides whether to mention it.
+#[tauri::command]
+async fn available_update(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(update.version)),
+        Ok(None) => Ok(None),
+        // A machine that is offline, or a release page that is briefly
+        // unreachable, is not something to put on screen.
+        Err(_) => Ok(None),
+    }
+}
+
+/// Downloads the waiting update, installs it, and restarts into it.
+///
+/// Only ever called from a button the user pressed. Nothing updates itself
+/// behind their back, because a reminder app that disappears mid-afternoon
+/// to reinstall itself is a reminder app that missed a prayer.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+        return Err("There is no update waiting.".to_string());
+    };
+
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    app.restart();
+}
+
 #[tauri::command]
 fn get_qaza(state: tauri::State<AppState>) -> stats::QazaView {
     stats::qaza(&state.log)
@@ -871,11 +910,14 @@ fn toggle_popover(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .invoke_handler(tauri::generate_handler![
+            available_update,
+            install_update,
             get_today,
             log_prayer,
             get_review,
