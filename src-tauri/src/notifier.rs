@@ -306,8 +306,16 @@ fn prayer_from(identifier: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// One identifier per prayer, deliberately stable.
+///
+/// A request whose identifier matches one already delivered replaces it
+/// rather than arriving beside it. Nudges for the same prayer therefore
+/// update the notification that is already waiting, instead of stacking:
+/// leave the Mac for an afternoon and you come back to one unanswered
+/// question about Zuhr, not ten. Dismiss it and the next nudge posts
+/// afresh, which is the right way to ask again.
 fn reminder_identifier(prayer: &str) -> String {
-    format!("prayer:{prayer}:{}", uuid::Uuid::new_v4())
+    format!("prayer:{prayer}")
 }
 
 /// Registers the delegate and the button, once, at startup.
@@ -339,4 +347,35 @@ pub fn install(on_act: impl Fn(Act) + Send + Sync + 'static) {
 /// Posts a reminder for a prayer, with the button on it.
 pub fn deliver_reminder(prayer: &str, title: &str, body: &str) -> Result<(), String> {
     post(&reminder_identifier(prayer), title, body, Some(REMINDER_CATEGORY))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_nudge_for_a_prayer_carries_the_same_identifier() {
+        // The whole point: macOS replaces a delivered notification whose
+        // identifier matches, so a second nudge must not look like a
+        // different notification or it arrives beside the first.
+        assert_eq!(reminder_identifier("zuhr"), reminder_identifier("zuhr"));
+        assert_ne!(reminder_identifier("zuhr"), reminder_identifier("asr"));
+    }
+
+    #[test]
+    fn the_prayer_survives_the_round_trip() {
+        // The response carries no payload of its own, so the identifier is
+        // the only place the prayer can be read back from.
+        for prayer in ["fajr", "zuhr", "asr", "maghrib", "isha"] {
+            assert_eq!(
+                prayer_from(&reminder_identifier(prayer)).as_deref(),
+                Some(prayer)
+            );
+        }
+    }
+
+    #[test]
+    fn a_test_notification_is_not_mistaken_for_a_reminder() {
+        assert_eq!(prayer_from("test:anything"), None);
+    }
 }
