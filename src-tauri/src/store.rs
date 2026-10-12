@@ -108,6 +108,12 @@ impl PrayerLog {
                 fired_at TEXT NOT NULL,
                 PRIMARY KEY (date, prayer)
             );
+            CREATE TABLE IF NOT EXISTS announcement_log (
+                date    TEXT NOT NULL,
+                prayer  TEXT NOT NULL,
+                sent_at TEXT NOT NULL,
+                PRIMARY KEY (date, prayer)
+            );
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -387,6 +393,34 @@ impl PrayerLog {
         let _ = connection.execute(
             "INSERT INTO reminder_log (date, prayer, fired_at) VALUES (?1, ?2, ?3)
              ON CONFLICT(date, prayer) DO UPDATE SET fired_at = excluded.fired_at",
+            rusqlite::params![date.to_string(), prayer_name(prayer), stamp(at)],
+        );
+    }
+
+    /// Whether the opening of this prayer's window has been announced.
+    ///
+    /// Kept apart from `reminder_log` on purpose. That table holds one
+    /// timestamp per prayer and the nudge schedule is counted forward from
+    /// it, so recording an announcement there would quietly move every
+    /// nudge after it.
+    pub fn start_announced(&self, date: NaiveDate, prayer: Prayer) -> bool {
+        let connection = self.connection.lock().unwrap();
+        connection
+            .query_row(
+                "SELECT 1 FROM announcement_log WHERE date = ?1 AND prayer = ?2",
+                rusqlite::params![date.to_string(), prayer_name(prayer)],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    pub fn record_start_announced(&self, date: NaiveDate, prayer: Prayer, at: DateTime<Utc>) {
+        let connection = self.connection.lock().unwrap();
+        let _ = connection.execute(
+            "INSERT OR IGNORE INTO announcement_log (date, prayer, sent_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![date.to_string(), prayer_name(prayer), stamp(at)],
         );
     }

@@ -668,6 +668,19 @@ fn notify(app: &AppHandle, due: &scheduler::DueNudge) {
 #[cfg(not(target_os = "macos"))]
 fn notify(_app: &AppHandle, _due: &scheduler::DueNudge) {}
 
+/// Says a prayer's time has begun. A heads-up rather than a question, so it
+/// removes itself after a few seconds — see `notifier::announce`.
+#[cfg(target_os = "macos")]
+fn announce_start(notice: &scheduler::StartNotice) {
+    let title = format!("{} has started", notice.label);
+    if let Err(error) = notifier::announce(store::prayer_name(notice.prayer), &title, "It's time to pray.") {
+        eprintln!("sakina: a start notice could not be shown: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn announce_start(_notice: &scheduler::StartNotice) {}
+
 /// Development-only: fires a reminder immediately, since a real one can be
 /// most of an hour away.
 #[cfg(debug_assertions)]
@@ -1082,10 +1095,20 @@ pub fn run() {
                 refresh_tray_title(&handle);
 
                 let state = handle.state::<AppState>();
+                let now = Utc::now();
+                // The opening first: a nudge never fires at the very start
+                // of a window, since the first one waits for its offset.
+                if let Ok(Some(notice)) =
+                    state
+                        .scheduler
+                        .poll_start(now, &state.settings.read().unwrap(), &state.log)
+                {
+                    announce_start(&notice);
+                }
                 if let Ok(Some(due)) =
                     state
                         .scheduler
-                        .poll(Utc::now(), &state.settings.read().unwrap(), &state.log)
+                        .poll(now, &state.settings.read().unwrap(), &state.log)
                 {
                     notify(&handle, &due);
                 }
