@@ -517,6 +517,12 @@ body {
   outline-offset: 1px;
 }
 
+/* A prayer that has not begun cannot be logged, and should not look as
+   though it could be. */
+.cell:disabled {
+  cursor: default;
+}
+
 .tiles {
   display: flex;
   gap: 8px;
