@@ -149,6 +149,10 @@ pub struct Settings {
     /// and the one moment a user is certain to miss is the one where they
     /// restarted their Mac and forgot the app existed.
     pub launch_at_login: bool,
+    /// A brief notice as each prayer's time begins, which removes itself
+    /// after a few seconds. Separate from the nudges: those ask whether you
+    /// have prayed, this only says the time has come.
+    pub announce_start: bool,
     pub theme: Theme,
     pub onboarded: bool,
 }
@@ -166,6 +170,7 @@ impl Default for Settings {
             bedtime_hour: 23,
             bedtime_minute: 30,
             launch_at_login: true,
+            announce_start: true,
             theme: Theme::System,
             onboarded: false,
         }

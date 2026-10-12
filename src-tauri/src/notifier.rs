@@ -349,6 +349,45 @@ pub fn deliver_reminder(prayer: &str, title: &str, body: &str) -> Result<(), Str
     post(&reminder_identifier(prayer), title, body, Some(REMINDER_CATEGORY))
 }
 
+/// How long a start notice stays before Sakina takes it back.
+const NOTICE_LIFETIME: Duration = Duration::from_secs(5);
+
+/// Says a prayer's time has begun, then withdraws it a few seconds later.
+///
+/// macOS gives an app a single alert style for everything it sends, and the
+/// user picks it. Sakina asks for Persistent so reminders wait on screen —
+/// which means a "Zuhr has started" would wait too, and there is no API to
+/// mark one notification as transient. So this one is retracted by hand.
+///
+/// Apple documents `removeDeliveredNotifications` as clearing Notification
+/// Center and says nothing about what is on screen, and nothing published
+/// confirms it either way. Checked on macOS 27: under the Alerts style it
+/// dismisses the on-screen alert too. If a later macOS stops doing that,
+/// the notice degrades into an ordinary persistent one rather than failing.
+///
+/// No button, and its own identifier namespace: it is a heads-up, not a
+/// question, and it can never replace a nudge or be replaced by one.
+/// Clicking it opens the panel, like any notification that is not a
+/// reminder.
+pub fn announce(prayer: &str, title: &str, body: &str) -> Result<(), String> {
+    let identifier = start_identifier(prayer);
+    post(&identifier, title, body, None)?;
+    std::thread::spawn(move || {
+        std::thread::sleep(NOTICE_LIFETIME);
+        withdraw(&identifier);
+    });
+    Ok(())
+}
+
+fn withdraw(identifier: &str) {
+    let identifiers = NSArray::from_retained_slice(&[NSString::from_str(identifier)]);
+    center().removeDeliveredNotificationsWithIdentifiers(&identifiers);
+}
+
+fn start_identifier(prayer: &str) -> String {
+    format!("start:{prayer}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +416,14 @@ mod tests {
     #[test]
     fn a_test_notification_is_not_mistaken_for_a_reminder() {
         assert_eq!(prayer_from("test:anything"), None);
+    }
+
+    #[test]
+    fn a_start_notice_never_collides_with_a_reminder() {
+        // Same prayer, different question. If these shared an identifier,
+        // announcing Zuhr would silently replace the nudge asking about it.
+        assert_ne!(start_identifier("zuhr"), reminder_identifier("zuhr"));
+        // And clicking one must not log the prayer as prayed.
+        assert_eq!(prayer_from(&start_identifier("zuhr")), None);
     }
 }

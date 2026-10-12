@@ -28,6 +28,7 @@ export type SettingsData = {
   bedtimeMinute: number;
   reciteMulk: boolean;
   launchAtLogin: boolean;
+  announceStart: boolean;
   theme: "system" | "light" | "dark";
   onboarded: boolean;
 };
@@ -94,6 +95,19 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
             checked={data.reciteMulk}
             onChange={(event) =>
               save({ ...data, reciteMulk: event.target.checked })
+            }
+          />
+        </label>
+        <label className="row">
+          {/* Separate from the reminders: those ask whether you have
+              prayed, this only says the time has come, then takes itself
+              away. */}
+          <span className="row-label">Announce when a prayer starts</span>
+          <input
+            type="checkbox"
+            checked={data.announceStart}
+            onChange={(event) =>
+              save({ ...data, announceStart: event.target.checked })
             }
           />
         </label>

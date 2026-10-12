@@ -21,6 +21,21 @@ pub struct DueNudge {
     pub ending_soon: bool,
 }
 
+/// A prayer's time has just begun.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartNotice {
+    pub prayer: Prayer,
+    pub label: &'static str,
+}
+
+/// How long after a window opens its start can still be announced.
+///
+/// Wide enough to survive the scheduler's 30-second tick and a Mac that
+/// woke a minute late; narrow enough that opening the lid at four in the
+/// afternoon does not announce a Zuhr that began at one. Telling someone a
+/// prayer "has started" hours after it did is worse than saying nothing.
+const START_GRACE: Duration = Duration::minutes(2);
+
 /// Decides when a reminder is due. The record of what has already fired
 /// lives in the database rather than here, so restarting the app mid-window
 /// does not repeat a reminder the user has already seen.
@@ -52,6 +67,51 @@ fn bedtime_on(date: NaiveDate, settings: &Settings) -> DateTime<Utc> {
 }
 
 impl Scheduler {
+    /// Returns a start notice if a prayer's window has just opened and it
+    /// has not been announced yet, recording it so it is announced once.
+    ///
+    /// Separate from `poll` because it answers a different question: not
+    /// "have you prayed?" but "the time has come". It ignores the first
+    /// nudge offset, since the whole point is the moment the window opens.
+    pub fn poll_start(
+        &self,
+        now: DateTime<Utc>,
+        settings: &Settings,
+        log: &PrayerLog,
+    ) -> Result<Option<StartNotice>, PrayerCalcError> {
+        if !settings.announce_start {
+            return Ok(None);
+        }
+
+        let date = today::display_date(now, settings)?;
+        let day = today::day_times_for(date, settings)?;
+
+        let Some(prayer) = Prayer::ALL
+            .into_iter()
+            .find(|prayer| window_for(&day, *prayer).contains(now))
+        else {
+            return Ok(None);
+        };
+        let window = window_for(&day, prayer);
+
+        if now - window.start > START_GRACE {
+            return Ok(None);
+        }
+        // Isha past bedtime gets no nudges, and no announcement either.
+        if now >= nudge_cutoff(prayer, &window, bedtime_on(date, settings)) {
+            return Ok(None);
+        }
+        if log.start_announced(date, prayer) {
+            return Ok(None);
+        }
+
+        log.record_start_announced(date, prayer, now);
+        Ok(Some(StartNotice {
+            prayer,
+            label: today::label_for(prayer, date),
+        }))
+    }
+
     /// Returns a nudge if one is due at `now`, and records it so the next
     /// one is scheduled from it.
     ///
@@ -180,6 +240,122 @@ mod tests {
         // The Zuhr window still has hours left, so the next one is +30 min.
         assert!(scheduler
             .poll(first + Duration::minutes(30), &settings, &log)
+            .unwrap()
+            .is_some());
+    }
+
+    /// When Zuhr's window opens on a given day in Gujranwala.
+    fn zuhr_opens_on(date: NaiveDate) -> DateTime<Utc> {
+        let settings = Settings::for_tests();
+        let day = today::day_times_for(date, &settings).unwrap();
+        window_for(&day, Prayer::Zuhr).start
+    }
+
+    fn monday() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 6, 15).unwrap()
+    }
+
+    #[test]
+    fn the_opening_of_a_window_is_announced_once() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let opened = zuhr_opens_on(monday());
+        let scheduler = Scheduler::default();
+
+        let notice = scheduler
+            .poll_start(opened + Duration::seconds(20), &settings, &log)
+            .unwrap()
+            .expect("the opening is announced");
+        assert_eq!(notice.prayer, Prayer::Zuhr);
+        assert_eq!(notice.label, "Zuhr");
+
+        // The next tick, thirty seconds on, says nothing more.
+        assert_eq!(
+            scheduler
+                .poll_start(opened + Duration::seconds(50), &settings, &log)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_restart_does_not_announce_the_same_opening_twice() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let opened = zuhr_opens_on(monday());
+
+        assert!(Scheduler::default()
+            .poll_start(opened, &settings, &log)
+            .unwrap()
+            .is_some());
+        // A fresh scheduler, as after relaunching, reads the record rather
+        // than its own memory.
+        assert_eq!(
+            Scheduler::default()
+                .poll_start(opened + Duration::seconds(30), &settings, &log)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn waking_long_after_a_window_opened_announces_nothing() {
+        // The lid opened at four in the afternoon. "Zuhr has started" would
+        // be telling the user something three hours out of date.
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let opened = zuhr_opens_on(monday());
+
+        assert_eq!(
+            Scheduler::default()
+                .poll_start(opened + Duration::hours(3), &settings, &log)
+                .unwrap(),
+            None
+        );
+        // Nor is it marked as announced, should the record matter later.
+        assert!(!log.start_announced(monday(), Prayer::Zuhr));
+    }
+
+    #[test]
+    fn announcing_can_be_switched_off() {
+        let mut settings = Settings::for_tests();
+        settings.announce_start = false;
+        let log = PrayerLog::in_memory().unwrap();
+
+        assert_eq!(
+            Scheduler::default()
+                .poll_start(zuhr_opens_on(monday()), &settings, &log)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn friday_announces_jumuah() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let friday = NaiveDate::from_ymd_opt(2026, 6, 19).unwrap();
+
+        let notice = Scheduler::default()
+            .poll_start(zuhr_opens_on(friday), &settings, &log)
+            .unwrap()
+            .expect("Friday's Zuhr is announced");
+        assert_ne!(notice.label, "Zuhr", "it should be called Jumu'ah");
+    }
+
+    #[test]
+    fn an_announcement_does_not_move_the_nudges() {
+        // Kept in its own table for exactly this: the nudge schedule counts
+        // forward from the last recorded reminder.
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        Scheduler::default()
+            .poll_start(zuhr_opens_on(monday()), &settings, &log)
+            .unwrap();
+
+        assert_eq!(log.last_reminder(monday(), Prayer::Zuhr), None);
+        assert!(Scheduler::default()
+            .poll(zuhr_first_nudge(), &settings, &log)
             .unwrap()
             .is_some());
     }
