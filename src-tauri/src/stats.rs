@@ -149,8 +149,11 @@ pub fn month_stats(
         let mulk_status = settings.recite_mulk.then(|| match mulk.get(&date) {
             Some(true) => "prayed",
             Some(false) => "missed",
-            // A day still running has not been missed yet.
-            None if date >= today => "upcoming",
+            // A day still running has not been missed yet — and like the
+            // prayer in progress, it can be logged, which is what "active"
+            // says and "upcoming" did not.
+            None if date > today => "upcoming",
+            None if date == today => "active",
             None => "unlogged",
         });
 
@@ -342,6 +345,15 @@ mod tests {
             today.statuses,
             vec!["unlogged", "active", "upcoming", "upcoming", "upcoming"]
         );
+        // Surah Mulk is a nightly habit with no window: today is open to it,
+        // tomorrow is not.
+        assert_eq!(today.mulk, Some("active"));
+        let tomorrow = view
+            .days
+            .iter()
+            .find(|day| day.date == "2026-06-16")
+            .expect("tomorrow is in the month");
+        assert_eq!(tomorrow.mulk, Some("upcoming"));
     }
 
     #[test]
