@@ -250,8 +250,11 @@ pub fn qaza(log: &PrayerLog) -> QazaView {
         })
         .collect();
 
-    rows.sort_by(|a, b| b.remaining.cmp(&a.remaining));
-    let largest = rows.first().map(|row| row.remaining).unwrap_or(0).max(1);
+    // Kept in prayer order. Ranking by debt reshuffled the list every time
+    // a count changed, so the same prayer was never in the same place, and
+    // the order that every other screen uses was the one thing this one
+    // would not follow.
+    let largest = rows.iter().map(|row| row.remaining).max().unwrap_or(0).max(1);
     for row in &mut rows {
         row.share = row.remaining as f64 / largest as f64;
     }
@@ -302,15 +305,22 @@ mod tests {
     }
 
     #[test]
-    fn rows_are_ranked_largest_first() {
+    fn rows_stay_in_prayer_order_whatever_is_owed() {
+        // Isha owes the most. Ranked by debt it would lead the list; it
+        // belongs last, where it is on every other screen.
         let log = PrayerLog::in_memory().unwrap();
-        log.set_backlog(Prayer::Asr, 5, at());
-        log.set_backlog(Prayer::Fajr, 40, at());
+        log.set_backlog(Prayer::Fajr, 5, at());
+        log.set_backlog(Prayer::Isha, 40, at());
 
         let view = qaza(&log);
-        assert_eq!(view.rows[0].prayer, Prayer::Fajr);
-        assert_eq!(view.rows[0].share, 1.0);
-        assert!(view.rows[1].share < 1.0);
+        let order: Vec<Prayer> = view.rows.iter().map(|row| row.prayer).collect();
+        assert_eq!(order, Prayer::ALL.to_vec());
+
+        // The bars still scale to the largest debt, wherever it sits.
+        let isha = view.rows.iter().find(|row| row.prayer == Prayer::Isha).unwrap();
+        let fajr = view.rows.iter().find(|row| row.prayer == Prayer::Fajr).unwrap();
+        assert_eq!(isha.share, 1.0);
+        assert!(fajr.share < 1.0);
     }
 
     #[test]
