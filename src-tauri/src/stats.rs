@@ -125,15 +125,18 @@ pub fn month_stats(
             .into_iter()
             .map(|prayer| {
                 let logged = logs.get(&(date, prayer)).copied();
-                // A window that has not closed yet is not a miss, it simply
-                // has not happened.
-                let closed = times
-                    .as_ref()
-                    .map(|times| window_for(times, prayer).end <= now)
-                    .unwrap_or(false);
+                let window = times.as_ref().map(|times| window_for(times, prayer));
+                let opened = window.map(|window| window.start <= now).unwrap_or(false);
+                let closed = window.map(|window| window.end <= now).unwrap_or(false);
 
+                // A window that has not closed yet is not a miss. But "not
+                // closed" covers two different things: one that has not
+                // begun, which there is nothing to log about, and the one
+                // the user is in right now, which is the most natural thing
+                // in the grid to log. Calling both "upcoming" locked the
+                // current prayer out along with the future ones.
                 if logged.is_none() && !closed {
-                    return "upcoming";
+                    return if opened { "active" } else { "upcoming" };
                 }
                 finished += 1;
                 if logged == Some(LoggedStatus::Prayed) {
@@ -146,8 +149,11 @@ pub fn month_stats(
         let mulk_status = settings.recite_mulk.then(|| match mulk.get(&date) {
             Some(true) => "prayed",
             Some(false) => "missed",
-            // A day still running has not been missed yet.
-            None if date >= today => "upcoming",
+            // A day still running has not been missed yet — and like the
+            // prayer in progress, it can be logged, which is what "active"
+            // says and "upcoming" did not.
+            None if date > today => "upcoming",
+            None if date == today => "active",
             None => "unlogged",
         });
 
@@ -318,6 +324,36 @@ mod tests {
         let view = qaza(&PrayerLog::in_memory().unwrap());
         assert_eq!(view.total, 0);
         assert!(view.rows.iter().all(|row| row.remaining == 0));
+    }
+
+    #[test]
+    fn the_prayer_in_progress_can_be_told_from_the_ones_to_come() {
+        // 13:30 in Gujranwala: Fajr is over, Zuhr is under way, and the rest
+        // of the day has not started. The grid has to tell those apart, or
+        // the prayer the user is in right now cannot be logged from it.
+        let log = PrayerLog::in_memory().unwrap();
+        let settings = Settings::for_tests();
+        let now = Utc.with_ymd_and_hms(2026, 6, 15, 8, 30, 0).unwrap();
+        let view = month_stats(now, &settings, &log, 2026, 6).unwrap();
+
+        let today = view
+            .days
+            .iter()
+            .find(|day| day.date == "2026-06-15")
+            .expect("today is in the month");
+        assert_eq!(
+            today.statuses,
+            vec!["unlogged", "active", "upcoming", "upcoming", "upcoming"]
+        );
+        // Surah Mulk is a nightly habit with no window: today is open to it,
+        // tomorrow is not.
+        assert_eq!(today.mulk, Some("active"));
+        let tomorrow = view
+            .days
+            .iter()
+            .find(|day| day.date == "2026-06-16")
+            .expect("tomorrow is in the month");
+        assert_eq!(tomorrow.mulk, Some("upcoming"));
     }
 
     #[test]

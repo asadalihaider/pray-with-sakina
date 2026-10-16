@@ -74,8 +74,14 @@ export default function Stats() {
   const statusAt = (day: DayStats, row: number) =>
     row < PRAYERS.length ? day.statuses[row] : day.mulk;
 
-  /// The first unlogged cell at or after a point, so clearing a backlog is
-  /// one click per entry instead of hunting for the grey squares.
+  /// A cell still waiting for an answer: a gap left behind, or the prayer
+  /// in progress. Stepping over the second would skip the one cell the user
+  /// is most likely to want next.
+  const isGap = (status: string | null | undefined) =>
+    status === "unlogged" || status === "active";
+
+  /// The next gap after a point, so clearing a backlog is one click per
+  /// entry instead of hunting for the grey squares.
   const nextUnlogged = (
     from: StatsView,
     afterDay: number,
@@ -88,7 +94,7 @@ export default function Stats() {
       for (let row = 0; row < rows; row += 1) {
         const later =
           day.day > afterDay || (day.day === afterDay && row > afterRow);
-        if (later && statusAt(day, row) === "unlogged") {
+        if (later && isGap(statusAt(day, row))) {
           return {
             date: day.date,
             day: day.day,
@@ -106,7 +112,14 @@ export default function Stats() {
   }, [load, offset]);
 
   const edit = async (status: "prayed" | "missed") => {
-    if (!selected) return;
+    if (!selected || !view) return;
+    // Filling a gap and correcting an answer are different jobs. Filling
+    // moves on to the next gap, so a week's backlog is a run of single
+    // clicks. Correcting stays put: the user is fixing this cell, wants to
+    // see the result, and a wrong tap should be one click to undo — not a
+    // jump to somewhere else or an editor that has closed.
+    const day = view.days.find((candidate) => candidate.date === selected.date);
+    const wasGap = day ? isGap(statusAt(day, selected.row)) : true;
     try {
       if (selected.prayer === null) {
         await invoke("log_mulk", {
@@ -126,7 +139,9 @@ export default function Stats() {
     }
     setRefused(null);
     const refreshed = await load(offset);
-    setSelected(nextUnlogged(refreshed, selected.day, selected.row));
+    if (wasGap) {
+      setSelected(nextUnlogged(refreshed, selected.day, selected.row));
+    }
   };
 
   if (!view) return <div className="tab-body" />;
