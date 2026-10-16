@@ -27,6 +27,31 @@ jobs:
           node-version: 20
           cache: npm
 
+      # The update manifest takes its version from the tag, while the app
+      # reports the one in tauri.conf.json. If they differ, an installed
+      # build reports the older number and is offered the same update every
+      # time the panel opens, for ever. Better to stop here than to find out
+      # from someone's nagging banner fourteen minutes and one release later.
+      #
+      # A pre-release tag (v0.1.3-test) is checked against its base version:
+      # it never becomes "latest", so its manifest never reaches anyone.
+      - name: Check the tag matches the version being built
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          WANT="${TAG#v}"
+          BASE="${WANT%%-*}"
+          APP=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$APP" != "$BASE" ] || [ "$PKG" != "$BASE" ]; then
+            echo "Tag $TAG does not match the version being built." >&2
+            echo "  tauri.conf.json: $APP" >&2
+            echo "  package.json:    $PKG" >&2
+            echo "Bump both to $BASE, merge, then tag again." >&2
+            exit 1
+          fi
+          echo "Building $BASE, which matches $TAG."
+
       # A universal binary needs both architectures. Without the Intel slice,
       # anyone on a pre-2020 Mac downloads something that will not open.
       - name: Add Rust targets
