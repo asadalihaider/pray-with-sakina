@@ -46,7 +46,10 @@ pub struct DayStats {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QazaView {
+    /// Prayers still owed.
     pub total: i64,
+    /// Prayers made up, counted only up to what was owed.
+    pub made_up: i64,
     pub rows: Vec<QazaRow>,
 }
 
@@ -56,9 +59,12 @@ pub struct QazaRow {
     pub prayer: Prayer,
     pub label: &'static str,
     pub remaining: i64,
+    /// Made up so far, capped at what was owed, so that made up and
+    /// remaining always add up to the debt the bar is drawn against. Making
+    /// up more than that is possible — lowering a backlog after the fact —
+    /// but there is nothing for the extra to count towards.
+    pub made_up: i64,
     pub backlog: i64,
-    /// Drives the bar width; the largest row is full width.
-    pub share: f64,
 }
 
 fn status_name(status: Option<LoggedStatus>) -> &'static str {
@@ -233,34 +239,29 @@ pub fn qaza(log: &PrayerLog) -> QazaView {
     let backlog: HashMap<Prayer, i64> = log.qaza_totals("backlog").into_iter().collect();
     let madeup: HashMap<Prayer, i64> = log.qaza_totals("madeup").into_iter().collect();
 
-    let mut rows: Vec<QazaRow> = Prayer::ALL
-        .into_iter()
-        .map(|prayer| {
-            let owed = missed.get(&prayer).copied().unwrap_or(0)
-                + backlog.get(&prayer).copied().unwrap_or(0);
-            QazaRow {
-                prayer,
-                label: today::label_for(prayer, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
-                // Making up more than is owed leaves nothing owed, not a
-                // negative debt.
-                remaining: (owed - madeup.get(&prayer).copied().unwrap_or(0)).max(0),
-                backlog: backlog.get(&prayer).copied().unwrap_or(0),
-                share: 0.0,
-            }
-        })
-        .collect();
-
     // Kept in prayer order. Ranking by debt reshuffled the list every time
     // a count changed, so the same prayer was never in the same place, and
     // the order that every other screen uses was the one thing this one
     // would not follow.
-    let largest = rows.iter().map(|row| row.remaining).max().unwrap_or(0).max(1);
-    for row in &mut rows {
-        row.share = row.remaining as f64 / largest as f64;
-    }
+    let rows: Vec<QazaRow> = Prayer::ALL
+        .into_iter()
+        .map(|prayer| {
+            let owed = missed.get(&prayer).copied().unwrap_or(0)
+                + backlog.get(&prayer).copied().unwrap_or(0);
+            let made_up = madeup.get(&prayer).copied().unwrap_or(0).min(owed);
+            QazaRow {
+                prayer,
+                label: today::label_for(prayer, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+                remaining: owed - made_up,
+                made_up,
+                backlog: backlog.get(&prayer).copied().unwrap_or(0),
+            }
+        })
+        .collect();
 
     QazaView {
         total: rows.iter().map(|row| row.remaining).sum(),
+        made_up: rows.iter().map(|row| row.made_up).sum(),
         rows,
     }
 }
@@ -316,11 +317,35 @@ mod tests {
         let order: Vec<Prayer> = view.rows.iter().map(|row| row.prayer).collect();
         assert_eq!(order, Prayer::ALL.to_vec());
 
-        // The bars still scale to the largest debt, wherever it sits.
+    }
+
+    #[test]
+    fn progress_counts_what_was_made_up_against_what_was_owed() {
+        let log = PrayerLog::in_memory().unwrap();
+        log.set_backlog(Prayer::Isha, 30, at());
+        for _ in 0..18 {
+            log.add_madeup(Prayer::Isha, at());
+        }
+
+        let view = qaza(&log);
         let isha = view.rows.iter().find(|row| row.prayer == Prayer::Isha).unwrap();
-        let fajr = view.rows.iter().find(|row| row.prayer == Prayer::Fajr).unwrap();
-        assert_eq!(isha.share, 1.0);
-        assert!(fajr.share < 1.0);
+        assert_eq!((isha.made_up, isha.remaining), (18, 12));
+        assert_eq!((view.made_up, view.total), (18, 12));
+    }
+
+    #[test]
+    fn making_up_more_than_was_owed_counts_only_what_was_owed() {
+        // Five made up, then the backlog lowered to three. The bar is drawn
+        // against what is owed, so the made-up count stops there too.
+        let log = PrayerLog::in_memory().unwrap();
+        log.set_backlog(Prayer::Fajr, 5, at());
+        for _ in 0..5 {
+            log.add_madeup(Prayer::Fajr, at());
+        }
+        log.set_backlog(Prayer::Fajr, 3, at());
+
+        let fajr = qaza(&log).rows.into_iter().find(|row| row.prayer == Prayer::Fajr).unwrap();
+        assert_eq!((fajr.made_up, fajr.remaining), (3, 0));
     }
 
     #[test]

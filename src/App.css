@@ -606,39 +606,46 @@ body {
   min-height: 0;
 }
 
+/* Two lines per prayer: name, counts and the button above, the bar below.
+   At this width they do not fit on one line without the counts being cut. */
 .qaza-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 0;
+}
+
+.qaza-line {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
 }
 
 .qaza-name {
-  width: 58px;
-  flex: none;
+  flex: 1;
   font-size: 13px;
   font-weight: 500;
 }
 
+/* The track is what is still owed; grey, the grid's colour for "not yet",
+   rather than red, which there means missed on time. */
 .qaza-bar {
-  flex: 1;
   height: 7px;
   border-radius: 4px;
-  background: var(--surface);
+  background: var(--unlogged-fill);
   overflow: hidden;
 }
 
 .qaza-fill {
   height: 100%;
   border-radius: 4px;
+  background: var(--prayed);
   transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .qaza-count {
-  width: 30px;
   flex: none;
-  text-align: right;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-dim);
 }
 
@@ -666,7 +673,8 @@ body {
 }
 
 .qaza-input {
-  flex: 1;
+  width: 72px;
+  flex: none;
   font: inherit;
   font-size: 13px;
   padding: 3px 7px;
@@ -689,6 +697,12 @@ body {
 
 .qaza-empty span {
   color: var(--text-faint);
+}
+
+.qaza-empty .qaza-empty-made-up {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--prayed);
 }
 
 .qaza-link {
