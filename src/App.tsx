@@ -265,9 +265,20 @@ export default function App() {
   }, [refresh]);
 
   // The web view survives hide/show, so a reopened popover would otherwise
-  // show whatever was on screen when it was last dismissed.
+  // show whatever was on screen when it was last dismissed — the data, and
+  // the screen too. Refreshing only Today's data left Stats and Qaza showing
+  // what they had loaded last: log a prayer from a notification, open the
+  // panel on Stats, and the grid still showed it unlogged.
+  //
+  // Opening on Today every time answers the question someone clicking a
+  // menu bar icon is actually asking — what is now, and have I prayed it —
+  // and the other tabs load fresh whenever they are switched to.
   useEffect(() => {
-    const pending = listen("popover-shown", refresh);
+    const pending = listen("popover-shown", () => {
+      setTab("today");
+      setChangingPlace(false);
+      refresh();
+    });
     return () => {
       pending.then((unlisten) => unlisten());
     };
