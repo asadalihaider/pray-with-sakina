@@ -581,20 +581,36 @@ body {
 
 /* ---------- qaza ---------- */
 
+/* The screen's name on the left, its two figures on the right: what is
+   left, and — once there is any — what has been made up. */
+/* A title and one sentence saying where things stand. It wraps like
+   ordinary text: the line fills, and only what does not fit moves down. */
 .qaza-head {
-  padding: 16px 18px 10px;
+  padding: 18px 18px 10px;
 }
 
-.qaza-total {
-  font-size: 31px;
+.qaza-title {
+  font-size: 18px;
   font-weight: 600;
-  line-height: 1;
 }
 
-.qaza-total-label {
-  margin-top: 2px;
-  font-size: 12px;
+.qaza-summary {
+  margin-top: 5px;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--text-dim);
+}
+
+/* Green is what has been done, as on the bars; what is left is the plain
+   text colour, picked out but not alarming. */
+.qaza-summary .is-made-up {
+  color: var(--prayed);
+  font-weight: 600;
+}
+
+.qaza-summary .is-left {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .qaza-list {
@@ -608,11 +624,14 @@ body {
 
 /* Two lines per prayer: name, counts and the button above, the bar below.
    At this width they do not fit on one line without the counts being cut. */
+/* The bar belongs to the name above it, so the gap inside a row is kept
+   well short of the gap between rows. With the two nearly equal, the rows
+   stopped reading as rows. */
 .qaza-row {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 7px 0;
+  gap: 6px;
+  padding: 9px 0;
 }
 
 .qaza-line {
@@ -649,13 +668,16 @@ body {
   color: var(--text-dim);
 }
 
+/* The plus is drawn rather than typed: a "+" glyph sits wherever the font
+   puts it, which in this one is visibly off centre in a small box. */
 .qaza-madeup {
   flex: none;
-  width: 20px;
-  height: 20px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: 1px solid var(--hairline);
   border-radius: 6px;
   background: none;

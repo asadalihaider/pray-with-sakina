@@ -21,10 +21,34 @@ function progress(row: QazaRow) {
   return owed === 0 ? 0 : (row.madeUp / owed) * 100;
 }
 
+/// Thousands separated: a backlog of years runs to five figures, and
+/// "30120" has to be counted where "30,120" can be read.
+const count = (n: number) => n.toLocaleString();
+
 function summary(row: QazaRow) {
   if (row.madeUp + row.remaining === 0) return "nothing owed";
-  if (row.remaining === 0) return `${row.madeUp} made up · done`;
-  return `${row.madeUp} made up · ${row.remaining} left`;
+  if (row.remaining === 0) return `${count(row.madeUp)} made up · done`;
+  return `${count(row.madeUp)} made up · ${count(row.remaining)} left`;
+}
+
+/// The screen's heading, said as a sentence rather than shown as figures.
+/// Two large numbers beside a title stopped fitting once a backlog ran to
+/// years; a sentence has room, and reads as encouragement rather than a
+/// scoreboard.
+function Progress({ view }: { view: QazaView }) {
+  if (view.madeUp === 0) {
+    return <>Log your missed prayers as you make them up</>;
+  }
+  return (
+    <>
+      You've made up{" "}
+      <span className="is-made-up">
+        {count(view.madeUp)} {view.madeUp === 1 ? "prayer" : "prayers"}
+      </span>{" "}
+      and <span className="is-left">{count(view.total)}</span>{" "}
+      {view.total === 1 ? "is" : "are"} still remaining
+    </>
+  );
 }
 
 export default function Qaza() {
@@ -54,7 +78,7 @@ export default function Qaza() {
           <br />
           <span>Alhamdulillah.</span>
           {view.madeUp > 0 && (
-            <span className="qaza-empty-made-up">{view.madeUp} made up</span>
+            <span className="qaza-empty-made-up">{count(view.madeUp)} made up</span>
           )}
         </div>
         <button className="qaza-link" onClick={() => setEditing(true)}>
@@ -67,11 +91,9 @@ export default function Qaza() {
   return (
     <div className="tab-body">
       <div className="qaza-head">
-        <div className="qaza-total">{view.total}</div>
-        <div className="qaza-total-label">
-          {view.madeUp > 0
-            ? `left · ${view.madeUp} made up so far`
-            : "prayers remaining"}
+        <div className="qaza-title">Qaza</div>
+        <div className="qaza-summary">
+          <Progress view={view} />
         </div>
       </div>
 
@@ -96,8 +118,16 @@ export default function Qaza() {
                     disabled={row.remaining === 0}
                     onClick={() => madeUp(row.prayer)}
                     title="Log a made-up prayer"
+                    aria-label={`Log a made-up ${row.label} prayer`}
                   >
-                    +
+                    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                      <path
+                        d="M5 1v8M1 5h8"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
                   </button>
                 </>
               )}
