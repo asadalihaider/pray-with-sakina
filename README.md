@@ -22,7 +22,9 @@ not to forgetfulness.
 - **Qaza counter** — missed prayers plus an optional backlog, less what you
   have made up
 - **Surah Mulk** — an optional daily habit tracked beside the prayers, with its
-  own streak
+  own streak. Reminders start an hour after Isha begins, or 15 minutes after
+  you log Isha as prayed if that is sooner, and repeat every 30 minutes until
+  you mark it recited or it is bedtime
 - **No account, no sign-in.** Your records are a file on your Mac and they stay
   there. The only request the app ever makes is to look up a city you typed.
 

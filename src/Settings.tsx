@@ -98,6 +98,11 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
             }
           />
         </label>
+        {data.reciteMulk && (
+          <div className="row-note">
+            Reminds you after Isha until it's recited, up to bedtime.
+          </div>
+        )}
         <label className="row">
           {/* Separate from the reminders: those ask whether you have
               prayed, this only says the time has come, then takes itself
@@ -300,7 +305,7 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
             }}
           />
         </div>
-        <div className="row-note">Isha reminders stop at bedtime.</div>
+        <div className="row-note">Isha and Surah Mulk reminders stop at bedtime.</div>
       </div>
 
       {import.meta.env.DEV && (
