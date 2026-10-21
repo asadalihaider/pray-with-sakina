@@ -53,9 +53,20 @@ const MULK_BEFORE_BEDTIME: Duration = Duration::minutes(30);
 #[derive(Default)]
 pub struct Scheduler;
 
+/// The bedtime that ends the night of `date`.
+///
+/// A bedtime before noon is the early hours after that night, not the
+/// morning of the same day: 00:30 means half past midnight, after Isha.
+/// Read as the same day, it fell before Isha had even begun and silenced
+/// every reminder that night.
 fn bedtime_on(date: NaiveDate, settings: &Settings) -> DateTime<Utc> {
     let (hour, minute) = settings.bedtime();
-    let local = date.and_time(
+    let night = if hour < 12 {
+        date + Duration::days(1)
+    } else {
+        date
+    };
+    let local = night.and_time(
         NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or_else(|| {
             NaiveTime::from_hms_opt(23, 30, 0).expect("23:30 is a valid time")
         }),
@@ -602,6 +613,39 @@ mod tests {
 
         let first = isha_opens() + Duration::hours(1);
         assert!(!scheduler.poll_mulk(first, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn a_bedtime_after_midnight_belongs_to_the_night_before() {
+        let mut settings = Settings::for_tests();
+        settings.bedtime_hour = 0;
+        settings.bedtime_minute = 30;
+
+        let bedtime = bedtime_on(monday(), &settings).with_timezone(&settings.timezone());
+        assert_eq!(bedtime.date_naive(), monday() + Duration::days(1));
+        assert_eq!((bedtime.hour(), bedtime.minute()), (0, 30));
+    }
+
+    #[test]
+    fn an_evening_bedtime_stays_on_the_same_day() {
+        let settings = Settings::for_tests();
+        let bedtime = bedtime_on(monday(), &settings).with_timezone(&settings.timezone());
+        assert_eq!(bedtime.date_naive(), monday());
+        assert_eq!((bedtime.hour(), bedtime.minute()), (23, 30));
+    }
+
+    #[test]
+    fn a_bedtime_after_midnight_keeps_the_night_reminders() {
+        let scheduler = Scheduler::default();
+        let mut settings = Settings::for_tests();
+        settings.bedtime_hour = 0;
+        settings.bedtime_minute = 30;
+        let log = PrayerLog::in_memory().unwrap();
+
+        // Past the default 23:30 and still before half past midnight.
+        let late = bedtime_on(monday(), &settings) - Duration::minutes(10);
+        assert!(scheduler.poll(late, &settings, &log).unwrap().is_some());
+        assert!(scheduler.poll_mulk(late, &settings, &log).unwrap());
     }
 
     #[test]
