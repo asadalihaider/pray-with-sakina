@@ -36,15 +36,37 @@ pub struct StartNotice {
 /// prayer "has started" hours after it did is worse than saying nothing.
 const START_GRACE: Duration = Duration::minutes(2);
 
+/// How long after Isha begins the Surah Mulk reminders start, when Isha has
+/// not been logged as prayed by then.
+const MULK_AFTER_ISHA: Duration = Duration::hours(1);
+/// How soon after Isha is logged as prayed they start instead, if sooner.
+const MULK_AFTER_PRAYED: Duration = Duration::minutes(15);
+/// How often they repeat until Mulk is logged as recited.
+const MULK_INTERVAL: Duration = Duration::minutes(30);
+/// On a night too short for the usual start, the single reminder comes
+/// this long before bedtime.
+const MULK_BEFORE_BEDTIME: Duration = Duration::minutes(30);
+
 /// Decides when a reminder is due. The record of what has already fired
 /// lives in the database rather than here, so restarting the app mid-window
 /// does not repeat a reminder the user has already seen.
 #[derive(Default)]
 pub struct Scheduler;
 
+/// The bedtime that ends the night of `date`.
+///
+/// A bedtime before noon is the early hours after that night, not the
+/// morning of the same day: 00:30 means half past midnight, after Isha.
+/// Read as the same day, it fell before Isha had even begun and silenced
+/// every reminder that night.
 fn bedtime_on(date: NaiveDate, settings: &Settings) -> DateTime<Utc> {
     let (hour, minute) = settings.bedtime();
-    let local = date.and_time(
+    let night = if hour < 12 {
+        date + Duration::days(1)
+    } else {
+        date
+    };
+    let local = night.and_time(
         NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or_else(|| {
             NaiveTime::from_hms_opt(23, 30, 0).expect("23:30 is a valid time")
         }),
@@ -110,6 +132,67 @@ impl Scheduler {
             prayer,
             label: today::label_for(prayer, date),
         }))
+    }
+
+    /// Whether a Surah Mulk reminder is due at `now`, recording it if so.
+    ///
+    /// Mulk is recited once a night, after whichever prayer suits, so the
+    /// reminders wait until the day's prayers are done: an hour after Isha
+    /// begins, or 15 minutes after Isha is logged as prayed if that comes
+    /// first. A missed Isha does not bring them forward. They repeat every
+    /// 30 minutes until Mulk is logged as recited, and stop at bedtime.
+    ///
+    /// Logged as not recited does not stop them, for the same reason a
+    /// missed prayer is still nudged while its window is open: there is
+    /// still time.
+    pub fn poll_mulk(
+        &self,
+        now: DateTime<Utc>,
+        settings: &Settings,
+        log: &PrayerLog,
+    ) -> Result<bool, PrayerCalcError> {
+        if !settings.recite_mulk {
+            return Ok(false);
+        }
+
+        let date = today::display_date(now, settings)?;
+        if log.mulk_recited(date) {
+            return Ok(false);
+        }
+
+        let day = today::day_times_for(date, settings)?;
+        let isha = window_for(&day, Prayer::Isha);
+        let bedtime = bedtime_on(date, settings);
+
+        let mut start = isha.start + MULK_AFTER_ISHA;
+        if let Some((LoggedStatus::Prayed, at)) = log.get(date, Prayer::Isha) {
+            start = start.min(at + MULK_AFTER_PRAYED);
+        }
+        // A night too short for that still gets one reminder, but never
+        // before Isha has begun.
+        if start >= bedtime {
+            start = (bedtime - MULK_BEFORE_BEDTIME).max(isha.start);
+        }
+
+        if now < start || now >= bedtime {
+            return Ok(false);
+        }
+
+        // Fast-forward to the most recent due reminder, so waking the Mac
+        // gives one, not a burst of the ones it slept through.
+        let due = match log.last_mulk_reminder(date) {
+            None => start,
+            Some(last) => {
+                let missed = (now - last).num_seconds() / MULK_INTERVAL.num_seconds();
+                if missed < 1 {
+                    return Ok(false);
+                }
+                last + MULK_INTERVAL * missed as i32
+            }
+        };
+
+        log.record_mulk_reminder(date, due);
+        Ok(true)
     }
 
     /// Returns a nudge if one is due at `now`, and records it so the next
@@ -193,6 +276,7 @@ impl Scheduler {
 mod tests {
     use super::*;
     use crate::engine::LoggedStatus;
+    use chrono::Timelike;
 
     /// 2026-06-15 in Gujranwala: Zuhr runs 12:01-16:24 local (07:01-11:24
     /// UTC), so the +60 minute first nudge lands at 08:01 UTC.
@@ -395,6 +479,173 @@ mod tests {
 
         log.set(date, Prayer::Zuhr, LoggedStatus::Prayed, first);
         assert_eq!(scheduler.poll(first, &settings, &log).unwrap(), None);
+    }
+
+    /// When Isha's window opens on Monday in Gujranwala, well before the
+    /// default 23:30 bedtime.
+    fn isha_opens() -> DateTime<Utc> {
+        let settings = Settings::for_tests();
+        let day = today::day_times_for(monday(), &settings).unwrap();
+        window_for(&day, Prayer::Isha).start
+    }
+
+    #[test]
+    fn mulk_waits_an_hour_after_isha_begins() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+
+        let early = isha_opens() + Duration::minutes(59);
+        assert!(!scheduler.poll_mulk(early, &settings, &log).unwrap());
+        let on_time = isha_opens() + Duration::hours(1);
+        assert!(scheduler.poll_mulk(on_time, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn praying_isha_brings_mulk_forward() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let prayed = isha_opens() + Duration::minutes(5);
+        log.set(monday(), Prayer::Isha, LoggedStatus::Prayed, prayed);
+
+        let too_soon = prayed + Duration::minutes(14);
+        assert!(!scheduler.poll_mulk(too_soon, &settings, &log).unwrap());
+        let after = prayed + Duration::minutes(15);
+        assert!(scheduler.poll_mulk(after, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn a_missed_isha_does_not_bring_mulk_forward() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let missed = isha_opens() + Duration::minutes(5);
+        log.set(monday(), Prayer::Isha, LoggedStatus::Missed, missed);
+
+        let later = missed + Duration::minutes(15);
+        assert!(!scheduler.poll_mulk(later, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn mulk_repeats_every_half_hour() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let first = isha_opens() + Duration::hours(1);
+
+        assert!(scheduler.poll_mulk(first, &settings, &log).unwrap());
+        let tick = first + Duration::seconds(30);
+        assert!(!scheduler.poll_mulk(tick, &settings, &log).unwrap());
+        let almost = first + Duration::minutes(29);
+        assert!(!scheduler.poll_mulk(almost, &settings, &log).unwrap());
+        let next = first + Duration::minutes(30);
+        assert!(scheduler.poll_mulk(next, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn only_recited_stops_the_mulk_reminders() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let first = isha_opens() + Duration::hours(1);
+
+        // Not recited yet, but bedtime is still to come: keep asking.
+        log.set_mulk(monday(), false, first);
+        assert!(scheduler.poll_mulk(first, &settings, &log).unwrap());
+
+        log.set_mulk(monday(), true, first);
+        let next = first + Duration::minutes(30);
+        assert!(!scheduler.poll_mulk(next, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn mulk_reminders_stop_at_bedtime() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let bedtime = bedtime_on(monday(), &settings);
+
+        assert!(!scheduler.poll_mulk(bedtime, &settings, &log).unwrap());
+        let before = bedtime - Duration::minutes(1);
+        assert!(scheduler.poll_mulk(before, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn a_short_night_gets_one_mulk_reminder_before_bedtime() {
+        let scheduler = Scheduler::default();
+        let mut settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        // Bedtime 40 minutes after Isha begins: too soon for the usual hour.
+        let bedtime = (isha_opens() + Duration::minutes(40)).with_timezone(&settings.timezone());
+        settings.bedtime_hour = bedtime.hour();
+        settings.bedtime_minute = bedtime.minute();
+        let bedtime = bedtime_on(monday(), &settings);
+
+        let early = bedtime - Duration::minutes(31);
+        assert!(!scheduler.poll_mulk(early, &settings, &log).unwrap());
+        let once = bedtime - Duration::minutes(30);
+        assert!(scheduler.poll_mulk(once, &settings, &log).unwrap());
+        let late = bedtime - Duration::minutes(1);
+        assert!(!scheduler.poll_mulk(late, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn waking_late_gives_one_mulk_reminder_not_a_burst() {
+        let scheduler = Scheduler::default();
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let first = isha_opens() + Duration::hours(1);
+        assert!(scheduler.poll_mulk(first, &settings, &log).unwrap());
+
+        let woke = first + Duration::minutes(65);
+        assert!(scheduler.poll_mulk(woke, &settings, &log).unwrap());
+        let tick = woke + Duration::seconds(30);
+        assert!(!scheduler.poll_mulk(tick, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn no_mulk_reminders_when_it_is_not_tracked() {
+        let scheduler = Scheduler::default();
+        let mut settings = Settings::for_tests();
+        settings.recite_mulk = false;
+        let log = PrayerLog::in_memory().unwrap();
+
+        let first = isha_opens() + Duration::hours(1);
+        assert!(!scheduler.poll_mulk(first, &settings, &log).unwrap());
+    }
+
+    #[test]
+    fn a_bedtime_after_midnight_belongs_to_the_night_before() {
+        let mut settings = Settings::for_tests();
+        settings.bedtime_hour = 0;
+        settings.bedtime_minute = 30;
+
+        let bedtime = bedtime_on(monday(), &settings).with_timezone(&settings.timezone());
+        assert_eq!(bedtime.date_naive(), monday() + Duration::days(1));
+        assert_eq!((bedtime.hour(), bedtime.minute()), (0, 30));
+    }
+
+    #[test]
+    fn an_evening_bedtime_stays_on_the_same_day() {
+        let settings = Settings::for_tests();
+        let bedtime = bedtime_on(monday(), &settings).with_timezone(&settings.timezone());
+        assert_eq!(bedtime.date_naive(), monday());
+        assert_eq!((bedtime.hour(), bedtime.minute()), (23, 30));
+    }
+
+    #[test]
+    fn a_bedtime_after_midnight_keeps_the_night_reminders() {
+        let scheduler = Scheduler::default();
+        let mut settings = Settings::for_tests();
+        settings.bedtime_hour = 0;
+        settings.bedtime_minute = 30;
+        let log = PrayerLog::in_memory().unwrap();
+
+        // Past the default 23:30 and still before half past midnight.
+        let late = bedtime_on(monday(), &settings) - Duration::minutes(10);
+        assert!(scheduler.poll(late, &settings, &log).unwrap().is_some());
+        assert!(scheduler.poll_mulk(late, &settings, &log).unwrap());
     }
 
     #[test]

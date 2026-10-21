@@ -222,6 +222,12 @@ const PRAYED_ACTION: &str = "sakina.prayed";
 /// The category the button is attached to. A notification without this
 /// category gets no button, which is what a test reminder wants.
 const REMINDER_CATEGORY: &str = "sakina.reminder";
+/// The button on a Surah Mulk reminder, and the category that carries it.
+const RECITED_ACTION: &str = "sakina.recited";
+const MULK_CATEGORY: &str = "sakina.mulk";
+/// Mulk is once a night, so one stable identifier does what the per-prayer
+/// ones do for reminders: a repeat replaces the one already waiting.
+const MULK_IDENTIFIER: &str = "mulk";
 
 /// What the user did with a reminder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -229,6 +235,8 @@ pub enum Act {
     /// Tapped the button on the notification. Carries the prayer the
     /// reminder was for, read back out of the request identifier.
     Prayed(String),
+    /// Tapped Recited on a Surah Mulk reminder.
+    Recited,
     /// Clicked the notification itself, which should open the panel.
     Opened,
 }
@@ -282,7 +290,9 @@ define_class!(
                 .to_string();
 
             if let Some(handler) = ON_ACT.get() {
-                if action == PRAYED_ACTION {
+                if action == RECITED_ACTION {
+                    handler(Act::Recited);
+                } else if action == PRAYED_ACTION {
                     if let Some(prayer) = prayer_from(&identifier) {
                         handler(Act::Prayed(prayer));
                     }
@@ -341,12 +351,29 @@ pub fn install(on_act: impl Fn(Act) + Send + Sync + 'static) {
             &NSArray::from_retained_slice(&[]),
             UNNotificationCategoryOptions::empty(),
         );
-    center().setNotificationCategories(&NSSet::from_retained_slice(&[category]));
+    let recited = UNNotificationAction::actionWithIdentifier_title_options(
+        &NSString::from_str(RECITED_ACTION),
+        &NSString::from_str("Recited"),
+        UNNotificationActionOptions::empty(),
+    );
+    let mulk =
+        UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(
+            &NSString::from_str(MULK_CATEGORY),
+            &NSArray::from_retained_slice(&[recited]),
+            &NSArray::from_retained_slice(&[]),
+            UNNotificationCategoryOptions::empty(),
+        );
+    center().setNotificationCategories(&NSSet::from_retained_slice(&[category, mulk]));
 }
 
 /// Posts a reminder for a prayer, with the button on it.
 pub fn deliver_reminder(prayer: &str, title: &str, body: &str) -> Result<(), String> {
     post(&reminder_identifier(prayer), title, body, Some(REMINDER_CATEGORY))
+}
+
+/// Posts a Surah Mulk reminder, with the Recited button on it.
+pub fn deliver_mulk_reminder(title: &str, body: &str) -> Result<(), String> {
+    post(MULK_IDENTIFIER, title, body, Some(MULK_CATEGORY))
 }
 
 /// How long a start notice stays before Sakina takes it back.

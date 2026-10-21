@@ -681,6 +681,17 @@ fn announce_start(notice: &scheduler::StartNotice) {
 #[cfg(not(target_os = "macos"))]
 fn announce_start(_notice: &scheduler::StartNotice) {}
 
+/// Asks whether Surah Mulk has been recited tonight.
+#[cfg(target_os = "macos")]
+fn notify_mulk() {
+    if let Err(error) = notifier::deliver_mulk_reminder("Surah Mulk", "Have you recited it tonight?") {
+        eprintln!("sakina: a Surah Mulk reminder could not be shown: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notify_mulk() {}
+
 /// Development-only: fires a reminder immediately, since a real one can be
 /// most of an hour away.
 #[cfg(debug_assertions)]
@@ -1010,6 +1021,17 @@ pub fn run() {
                             }
                             refresh_tray_title(&app);
                         }
+                        notifier::Act::Recited => {
+                            let now = Utc::now();
+                            let state = app.state::<AppState>();
+                            let date = today::display_date(
+                                now,
+                                &state.settings.read().unwrap(),
+                            );
+                            if let Ok(date) = date {
+                                state.log.set_mulk(date, true, now);
+                            }
+                        }
                         notifier::Act::Opened => {
                             let opener = app.clone();
                             let _ = app
@@ -1111,6 +1133,13 @@ pub fn run() {
                         .poll(now, &state.settings.read().unwrap(), &state.log)
                 {
                     notify(&handle, &due);
+                }
+                if let Ok(true) =
+                    state
+                        .scheduler
+                        .poll_mulk(now, &state.settings.read().unwrap(), &state.log)
+                {
+                    notify_mulk();
                 }
 
                 std::thread::sleep(std::time::Duration::from_secs(TICK_SECONDS));

@@ -108,6 +108,10 @@ impl PrayerLog {
                 fired_at TEXT NOT NULL,
                 PRIMARY KEY (date, prayer)
             );
+            CREATE TABLE IF NOT EXISTS mulk_reminder_log (
+                date     TEXT PRIMARY KEY,
+                fired_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS announcement_log (
                 date    TEXT NOT NULL,
                 prayer  TEXT NOT NULL,
@@ -360,6 +364,46 @@ impl PrayerLog {
             Some((date.parse().ok()?, status == "recited"))
         })
         .collect()
+    }
+
+    /// Whether Surah Mulk was logged as recited on this day. Logged as not
+    /// recited counts as no: the reminders keep going until bedtime.
+    pub fn mulk_recited(&self, date: NaiveDate) -> bool {
+        self.mulk_between(date, date)
+            .into_iter()
+            .any(|(_, recited)| recited)
+    }
+
+    /// When the last Surah Mulk reminder for a day was fired.
+    ///
+    /// Its own table rather than a row in `reminder_log`: that one is keyed
+    /// by prayer, and Mulk is not one.
+    pub fn last_mulk_reminder(&self, date: NaiveDate) -> Option<DateTime<Utc>> {
+        let connection = self.connection.lock().unwrap();
+        let value: Option<String> = connection
+            .query_row(
+                "SELECT fired_at FROM mulk_reminder_log WHERE date = ?1",
+                rusqlite::params![date.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+
+        value.and_then(|raw| {
+            DateTime::parse_from_rfc3339(&raw)
+                .ok()
+                .map(|parsed| parsed.with_timezone(&Utc))
+        })
+    }
+
+    pub fn record_mulk_reminder(&self, date: NaiveDate, at: DateTime<Utc>) {
+        let connection = self.connection.lock().unwrap();
+        let _ = connection.execute(
+            "INSERT INTO mulk_reminder_log (date, fired_at) VALUES (?1, ?2)
+             ON CONFLICT(date) DO UPDATE SET fired_at = excluded.fired_at",
+            rusqlite::params![date.to_string(), stamp(at)],
+        );
     }
 
     /// When the last reminder for a prayer was fired.
