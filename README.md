@@ -12,8 +12,9 @@ not to forgetfulness.
 - **Menu bar countdown** — the current prayer and time left, e.g. `Maghrib · 1h 7m`
 - **Reminders** that start at a per-prayer offset and get more frequent as the
   window closes, stopping the moment you log the prayer
-- **A start notice** as each prayer's time begins — *Asr has started* — that
-  removes itself after five seconds. A heads-up, not a question, so it never
+- **A start notice** as each prayer's time begins — *Asr has started*, with
+  the jamaat time if you have set one, so you know how long there is to get
+  ready — that removes itself after five seconds. A heads-up, not a question, so it never
   waits for you the way a reminder does
 - **Prayed / Missed / Unlogged** — an unanswered prayer becomes *Unlogged*,
   never Qaza. Only you can mark something missed.

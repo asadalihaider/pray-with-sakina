@@ -2,7 +2,8 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde::Serialize;
 
 use crate::engine::{
-    first_nudge_time, next_nudge, nudge_cutoff, window_for, LoggedStatus, Prayer, PrayerCalcError,
+    first_nudge_time, next_nudge, nudge_cutoff, window_for, FirstNudge, LoggedStatus, Prayer,
+    PrayerCalcError,
 };
 use crate::settings::Settings;
 use crate::store::PrayerLog;
@@ -26,6 +27,9 @@ pub struct DueNudge {
 pub struct StartNotice {
     pub prayer: Prayer,
     pub label: &'static str,
+    /// The local jamaat time, when one is set for this prayer and is still
+    /// to come, so the notice can say how long there is to get ready.
+    pub jamaat: Option<NaiveTime>,
 }
 
 /// How long after a window opens its start can still be announced.
@@ -127,10 +131,21 @@ impl Scheduler {
             return Ok(None);
         }
 
+        let friday = date.weekday() == chrono::Weekday::Fri;
+        let jamaat = match settings.first_nudge_for(prayer, friday) {
+            config @ FirstNudge::JamaatTime { .. } => {
+                let at = first_nudge_time(&window, config, settings.timezone());
+                // A jamaat time already behind us says nothing useful.
+                (at > now).then(|| at.with_timezone(&settings.timezone()).time())
+            }
+            FirstNudge::OffsetMinutes { .. } => None,
+        };
+
         log.record_start_announced(date, prayer, now);
         Ok(Some(StartNotice {
             prayer,
             label: today::label_for(prayer, date),
+            jamaat,
         }))
     }
 
@@ -337,6 +352,57 @@ mod tests {
 
     fn monday() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 6, 15).unwrap()
+    }
+
+    /// Settings with Zuhr's reminder at a fixed jamaat time.
+    fn zuhr_jamaat_at(hour: u32, minute: u32) -> Settings {
+        let mut settings = Settings::for_tests();
+        for setting in settings.first_nudge.iter_mut() {
+            if setting.prayer == Prayer::Zuhr {
+                setting.first_nudge = FirstNudge::JamaatTime { hour, minute };
+            }
+        }
+        settings
+    }
+
+    #[test]
+    fn the_start_notice_carries_a_jamaat_time_still_to_come() {
+        let settings = zuhr_jamaat_at(13, 30);
+        let log = PrayerLog::in_memory().unwrap();
+        let opened = zuhr_opens_on(monday());
+
+        let notice = Scheduler::default()
+            .poll_start(opened + Duration::seconds(20), &settings, &log)
+            .unwrap()
+            .expect("the opening is announced");
+        assert_eq!(notice.jamaat, NaiveTime::from_hms_opt(13, 30, 0));
+    }
+
+    #[test]
+    fn the_start_notice_leaves_out_a_jamaat_time_already_past() {
+        // Zuhr opens at 12:01 here, so a 12:00 jamaat has been and gone.
+        let settings = zuhr_jamaat_at(12, 0);
+        let log = PrayerLog::in_memory().unwrap();
+        let opened = zuhr_opens_on(monday());
+
+        let notice = Scheduler::default()
+            .poll_start(opened + Duration::seconds(20), &settings, &log)
+            .unwrap()
+            .expect("the opening is announced");
+        assert_eq!(notice.jamaat, None);
+    }
+
+    #[test]
+    fn the_start_notice_has_no_jamaat_time_without_one_set() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let opened = zuhr_opens_on(monday());
+
+        let notice = Scheduler::default()
+            .poll_start(opened + Duration::seconds(20), &settings, &log)
+            .unwrap()
+            .expect("the opening is announced");
+        assert_eq!(notice.jamaat, None);
     }
 
     #[test]
