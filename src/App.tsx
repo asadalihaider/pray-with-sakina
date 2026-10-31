@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatClock, formatDuration } from "./format";
@@ -47,6 +47,8 @@ type TodayView = {
 type Tab = "today" | "stats" | "qaza" | "settings";
 
 const REFRESH_MS = 5000;
+/** How long before opening the panel checks for an update again. */
+const UPDATE_CHECK_MS = 6 * 60 * 60 * 1000;
 const RING_RADIUS = 62;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
@@ -248,11 +250,22 @@ export default function App() {
     loadReview();
   }, [loadReview]);
 
-  useEffect(() => {
+  // Sakina starts at login and can run for weeks, so checking only at
+  // launch meant an update went unnoticed until the next restart. It
+  // checks again when the panel opens, but not more than every few hours:
+  // the release page does not change by the minute.
+  const lastUpdateCheck = useRef(0);
+  const checkForUpdate = useCallback(() => {
+    if (Date.now() - lastUpdateCheck.current < UPDATE_CHECK_MS) return;
+    lastUpdateCheck.current = Date.now();
     invoke<string | null>("available_update")
       .then(setUpdate)
       .catch(() => setUpdate(null));
   }, []);
+
+  useEffect(() => {
+    checkForUpdate();
+  }, [checkForUpdate]);
 
   useEffect(() => {
     refresh();
@@ -278,11 +291,12 @@ export default function App() {
       setTab("today");
       setChangingPlace(false);
       refresh();
+      checkForUpdate();
     });
     return () => {
       pending.then((unlisten) => unlisten());
     };
-  }, [refresh]);
+  }, [refresh, checkForUpdate]);
 
   const markPrayed = useCallback(async () => {
     if (!view) return;

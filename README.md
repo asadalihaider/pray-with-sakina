@@ -73,8 +73,9 @@ Upgrading later is `brew upgrade --cask sakina`.
 
 ### Updates
 
-Sakina checks the releases page when you open the panel, and says so with a
-strip across the top if a newer version is waiting. Pressing **Update and
+Sakina checks the releases page when it starts, and again when you open the
+panel if it has been six hours since the last look, and says so with a strip
+across the top if a newer version is waiting. Pressing **Update and
 restart** downloads it, verifies it against a signing key built into the app,
 and relaunches.
 
