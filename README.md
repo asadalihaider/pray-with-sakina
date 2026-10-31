@@ -12,8 +12,9 @@ not to forgetfulness.
 - **Menu bar countdown** — the current prayer and time left, e.g. `Maghrib · 1h 7m`
 - **Reminders** that start at a per-prayer offset and get more frequent as the
   window closes, stopping the moment you log the prayer
-- **A start notice** as each prayer's time begins — *Asr has started* — that
-  removes itself after five seconds. A heads-up, not a question, so it never
+- **A start notice** as each prayer's time begins — *Asr has started*, with
+  the jamaat time if you have set one, so you know how long there is to get
+  ready — that removes itself after five seconds. A heads-up, not a question, so it never
   waits for you the way a reminder does
 - **Prayed / Missed / Unlogged** — an unanswered prayer becomes *Unlogged*,
   never Qaza. Only you can mark something missed.
@@ -73,8 +74,9 @@ Upgrading later is `brew upgrade --cask sakina`.
 
 ### Updates
 
-Sakina checks the releases page when you open the panel, and says so with a
-strip across the top if a newer version is waiting. Pressing **Update and
+Sakina checks the releases page when it starts, and again when you open the
+panel if it has been six hours since the last look, and says so with a strip
+across the top if a newer version is waiting. Pressing **Update and
 restart** downloads it, verifies it against a signing key built into the app,
 and relaunches.
 

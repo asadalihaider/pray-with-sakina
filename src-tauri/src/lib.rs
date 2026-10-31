@@ -668,12 +668,23 @@ fn notify(app: &AppHandle, due: &scheduler::DueNudge) {
 #[cfg(not(target_os = "macos"))]
 fn notify(_app: &AppHandle, _due: &scheduler::DueNudge) {}
 
+/// What a start notice says under its title: a nudge to get ready for the
+/// jamaat, with its time when one is set, rather than a second notice
+/// shortly before it.
+fn start_notice_body(jamaat: Option<chrono::NaiveTime>) -> String {
+    match jamaat {
+        Some(time) => format!("Jamaat at {}. Time to get ready.", time.format("%-I:%M %p")),
+        None => "Time to get ready for the jamaat.".to_string(),
+    }
+}
+
 /// Says a prayer's time has begun. A heads-up rather than a question, so it
 /// removes itself after a few seconds — see `notifier::announce`.
 #[cfg(target_os = "macos")]
 fn announce_start(notice: &scheduler::StartNotice) {
     let title = format!("{} has started", notice.label);
-    if let Err(error) = notifier::announce(store::prayer_name(notice.prayer), &title, "It's time to pray.") {
+    let body = start_notice_body(notice.jamaat);
+    if let Err(error) = notifier::announce(store::prayer_name(notice.prayer), &title, &body) {
         eprintln!("sakina: a start notice could not be shown: {error}");
     }
 }
@@ -1169,6 +1180,13 @@ mod tests {
         // Isha is hours away, and the month grid is for correcting the
         // record rather than predicting it.
         assert!(has_begun(mid_afternoon(), date, Prayer::Isha, &settings).is_err());
+    }
+
+    #[test]
+    fn the_start_notice_names_the_jamaat_time_when_there_is_one() {
+        let jamaat = chrono::NaiveTime::from_hms_opt(16, 30, 0);
+        assert_eq!(start_notice_body(jamaat), "Jamaat at 4:30 PM. Time to get ready.");
+        assert_eq!(start_notice_body(None), "Time to get ready for the jamaat.");
     }
 
     #[test]
