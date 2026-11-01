@@ -287,6 +287,67 @@ impl Scheduler {
     }
 }
 
+/// How far back a return looks. Matches the morning review, so a Mac left
+/// shut for a month does not come back to a count nobody will work through.
+const AWAY_DAYS: i64 = 7;
+
+/// Prayers whose time ended while nobody was at the Mac and that are still
+/// unlogged, in the order they ended.
+///
+/// Only the ones that ended in between: an unlogged Fajr from before the
+/// user stepped away was nudged while they were there, and the review and
+/// the month grid already hold it. And only the ones that ended — the
+/// prayer still open on return goes on being nudged as usual.
+pub fn ended_while_away(
+    since: DateTime<Utc>,
+    now: DateTime<Utc>,
+    settings: &Settings,
+    log: &PrayerLog,
+) -> Result<Vec<(NaiveDate, Prayer)>, PrayerCalcError> {
+    let since = since.max(now - Duration::days(AWAY_DAYS));
+    let last = today::display_date(now, settings)?;
+    // The day before `since` too: its Isha runs on into the day after.
+    let mut date = today::display_date(since, settings)? - Duration::days(1);
+
+    let mut ended = Vec::new();
+    while date <= last {
+        if let Ok(day) = today::day_times_for(date, settings) {
+            for prayer in Prayer::ALL {
+                let window = window_for(&day, prayer);
+                if window.end > since && window.end <= now && log.get(date, prayer).is_none() {
+                    ended.push((date, prayer));
+                }
+            }
+        }
+        date += Duration::days(1);
+    }
+    Ok(ended)
+}
+
+/// The one notification a return gets: a title with the count, and a line
+/// naming the prayers when there are few enough to name.
+///
+/// "Not logged", never "missed": the user may well have prayed while the
+/// laptop was shut, and nothing counts as Qaza until they say so.
+pub fn away_summary(labels: &[&str]) -> (String, String) {
+    let count = labels.len();
+    let title = if count == 1 {
+        "1 prayer not logged".to_string()
+    } else {
+        format!("{count} prayers not logged")
+    };
+    let named = match labels {
+        [one] => format!("{one} ended while you were away."),
+        [first, second] => format!("{first} and {second} ended while you were away."),
+        [first, second, third] => {
+            format!("{first}, {second} and {third} ended while you were away.")
+        }
+        _ => "They ended while you were away.".to_string(),
+    };
+    let ask = if count == 1 { "Click to log it." } else { "Click to log them." };
+    (title, format!("{named} {ask}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,5 +822,90 @@ mod tests {
 
         let due = scheduler.poll(nearly_over, &settings, &log).unwrap().unwrap();
         assert!(due.ending_soon);
+    }
+
+    /// Monday's prayer times in Gujranwala, for the away tests.
+    fn monday_times() -> crate::engine::DayTimes {
+        today::day_times_for(monday(), &Settings::for_tests()).unwrap()
+    }
+
+    #[test]
+    fn a_return_counts_only_the_prayers_that_ended_while_away() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        // Away from midway through Zuhr until midway through Maghrib.
+        let since = window_for(&monday_times(), Prayer::Zuhr).start + Duration::minutes(30);
+        let now = window_for(&monday_times(), Prayer::Maghrib).start + Duration::minutes(10);
+
+        let ended = ended_while_away(since, now, &settings, &log).unwrap();
+        assert_eq!(
+            ended,
+            vec![(monday(), Prayer::Zuhr), (monday(), Prayer::Asr)],
+            "Fajr ended before, Maghrib is still open"
+        );
+    }
+
+    #[test]
+    fn a_prayer_logged_while_away_is_not_counted() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        let since = window_for(&monday_times(), Prayer::Zuhr).start;
+        let now = window_for(&monday_times(), Prayer::Maghrib).start + Duration::minutes(10);
+        // Logged from the notification button, or as missed: either way it
+        // has an answer.
+        log.set(monday(), Prayer::Zuhr, LoggedStatus::Prayed, since);
+        log.set(monday(), Prayer::Asr, LoggedStatus::Missed, since);
+
+        assert!(ended_while_away(since, now, &settings, &log).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_short_break_inside_one_prayer_counts_nothing() {
+        let settings = Settings::for_tests();
+        let zuhr = window_for(&monday_times(), Prayer::Zuhr);
+        let since = zuhr.start + Duration::minutes(5);
+
+        assert!(ended_while_away(
+            since,
+            since + Duration::minutes(15),
+            &settings,
+            &PrayerLog::in_memory().unwrap()
+        )
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn a_night_away_counts_isha_from_the_evening_before() {
+        let settings = Settings::for_tests();
+        let log = PrayerLog::in_memory().unwrap();
+        // Shut during Sunday's Isha, opened after Monday's Fajr.
+        let sunday = monday() - Duration::days(1);
+        let day = today::day_times_for(sunday, &settings).unwrap();
+        let since = window_for(&day, Prayer::Isha).start + Duration::minutes(30);
+        let now = window_for(&monday_times(), Prayer::Fajr).end + Duration::minutes(30);
+
+        assert_eq!(
+            ended_while_away(since, now, &settings, &log).unwrap(),
+            vec![(sunday, Prayer::Isha), (monday(), Prayer::Fajr)]
+        );
+    }
+
+    #[test]
+    fn the_summary_names_a_few_prayers_and_counts_many() {
+        assert_eq!(
+            away_summary(&["Zuhr"]),
+            (
+                "1 prayer not logged".to_string(),
+                "Zuhr ended while you were away. Click to log it.".to_string()
+            )
+        );
+        assert_eq!(
+            away_summary(&["Zuhr", "Asr", "Maghrib"]).1,
+            "Zuhr, Asr and Maghrib ended while you were away. Click to log them."
+        );
+        let (title, body) = away_summary(&["Fajr", "Zuhr", "Asr", "Maghrib", "Isha"]);
+        assert_eq!(title, "5 prayers not logged");
+        assert_eq!(body, "They ended while you were away. Click to log them.");
     }
 }

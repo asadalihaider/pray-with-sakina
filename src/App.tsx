@@ -183,6 +183,9 @@ export default function App() {
   const [view, setView] = useState<TodayView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("today");
+  // Bumped on every open, so a tab the panel was left on still loads fresh
+  // when it reopens straight onto it.
+  const [opened, setOpened] = useState(0);
   const [review, setReview] = useState<ReviewItem[] | null>(null);
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [changingPlace, setChangingPlace] = useState(false);
@@ -286,9 +289,19 @@ export default function App() {
   // Opening on Today every time answers the question someone clicking a
   // menu bar icon is actually asking — what is now, and have I prayed it —
   // and the other tabs load fresh whenever they are switched to.
+  //
+  // The one exception is the summary of prayers that ended while the user
+  // was away, which opens straight on the grid to log them. That is where
+  // the morning review would have sent them too, so it counts as done.
   useEffect(() => {
-    const pending = listen("popover-shown", () => {
-      setTab("today");
+    const pending = listen<Tab | null>("popover-shown", (event) => {
+      const opening = event.payload ?? "today";
+      setTab(opening);
+      setOpened((count) => count + 1);
+      if (opening === "stats") {
+        setReview(null);
+        invoke("finish_review").catch(() => {});
+      }
       setChangingPlace(false);
       refresh();
       checkForUpdate();
@@ -458,7 +471,7 @@ export default function App() {
         </div>
       )}
 
-      {!error && configured && !review && tab === "stats" && <Stats />}
+      {!error && configured && !review && tab === "stats" && <Stats key={opened} />}
       {!error && configured && !review && tab === "qaza" && <Qaza />}
 
       {!error && configured && !review && tab === "settings" && (

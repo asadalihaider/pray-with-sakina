@@ -38,15 +38,16 @@ tauri-plugin-updater = "2"
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# No `panic = "abort"`: the prayer engine catches panics from the `salah`
+# crate, and aborting makes that catch a no-op that takes the app down.
 strip = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSStatusBar", "NSAnimationContext", "NSAnimation", "NSApplication", "NSAppearance", "NSMenu", "NSMenuItem", "NSEvent", "block2"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSStatusBar", "NSAnimationContext", "NSAnimation", "NSApplication", "NSAppearance", "NSMenu", "NSMenuItem", "NSEvent", "NSWorkspace", "block2"] }
 objc2-core-location = { version = "0.3", features = ["CLLocationManager", "CLLocationManagerDelegate", "CLLocation", "CLGeocoder", "CLPlacemark", "block2"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSString"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSString", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "block2"] }
 objc2-user-notifications = { version = "0.3", features = [
   "UNUserNotificationCenter",
   "UNNotificationRequest",

@@ -79,21 +79,53 @@ pub fn compute_day_times(
     coordinates: Coordinates,
     params: Parameters,
 ) -> Result<DayTimes, PrayerCalcError> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let today = PrayerTimes::new(date, coordinates, params);
-        let tomorrow = PrayerTimes::new(date + Duration::days(1), coordinates, params);
+    let today = prayer_times(date, coordinates, params)?;
+    let tomorrow = prayer_times(date + Duration::days(1), coordinates, params)?;
 
-        DayTimes {
-            fajr: today.time(SalahPrayer::Fajr),
-            sunrise: today.time(SalahPrayer::Sunrise),
-            zuhr: today.time(SalahPrayer::Dhuhr),
-            asr: today.time(SalahPrayer::Asr),
-            maghrib: today.time(SalahPrayer::Maghrib),
-            isha: today.time(SalahPrayer::Isha),
-            next_fajr: tomorrow.time(SalahPrayer::Fajr),
-        }
-    }))
-    .map_err(|_| PrayerCalcError::UnsupportedLocation)
+    Ok(DayTimes {
+        fajr: today.time(SalahPrayer::Fajr),
+        sunrise: today.time(SalahPrayer::Sunrise),
+        zuhr: today.time(SalahPrayer::Dhuhr),
+        asr: today.time(SalahPrayer::Asr),
+        maghrib: today.time(SalahPrayer::Maghrib),
+        isha: today.time(SalahPrayer::Isha),
+        next_fajr: tomorrow.time(SalahPrayer::Fajr),
+    })
+}
+
+/// How far to nudge a location when `salah` trips over its own rounding:
+/// 0.15° of longitude moves every time by 36 seconds, 0.3° by 72.
+const ROUNDING_NUDGES_DEGREES: [f64; 4] = [0.15, -0.15, 0.3, -0.3];
+
+/// One day's times from `salah`, with its panics contained.
+///
+/// It panics in two ways. Near the poles the sun's angle math has no answer,
+/// which is a real limit and surfaces as an error. But it also rounds to the
+/// minute without carrying into the next day, so any time that lands in the
+/// last 30 seconds before midnight UTC becomes hour 24 and panics — Fajr in
+/// Pakistan does this a few days a year. Moving the location a hair east or
+/// west pushes that time out of the half-minute, at the cost of at most a
+/// minute or two of rounding on that one day. Both directions and two sizes
+/// are tried, since `salah` works out sunrise for neighbouring days as well,
+/// and a nudge that frees one can push another into the gap.
+fn prayer_times(
+    date: NaiveDate,
+    coordinates: Coordinates,
+    params: Parameters,
+) -> Result<PrayerTimes, PrayerCalcError> {
+    let attempt = |coordinates: Coordinates| {
+        std::panic::catch_unwind(|| PrayerTimes::new(date, coordinates, params)).ok()
+    };
+    attempt(coordinates)
+        .or_else(|| {
+            ROUNDING_NUDGES_DEGREES.into_iter().find_map(|nudge| {
+                attempt(Coordinates::new(
+                    coordinates.latitude,
+                    coordinates.longitude + nudge,
+                ))
+            })
+        })
+        .ok_or(PrayerCalcError::UnsupportedLocation)
 }
 
 #[cfg(test)]
@@ -172,6 +204,23 @@ mod tests {
         assert!(day.asr < day.maghrib);
         assert!(day.maghrib < day.isha);
         assert!(day.isha < day.next_fajr);
+    }
+
+    #[test]
+    fn a_time_rounding_up_to_midnight_utc_still_computes() {
+        // Gujranwala, where `salah` puts Fajr in the last half-minute before
+        // midnight UTC on these days and then rounds it to hour 24.
+        let coords = Coordinates::new(32.19255831157831, 74.1725743421067);
+        for day in [
+            NaiveDate::from_ymd_opt(2026, 11, 3).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+            // Sunrise rounds up to midnight here instead.
+            NaiveDate::from_ymd_opt(2026, 5, 24).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 5, 25).unwrap(),
+        ] {
+            let times = compute_day_times(day, coords, karachi_hanafi_params()).unwrap();
+            assert!(times.fajr < times.sunrise && times.isha < times.next_fajr);
+        }
     }
 
     #[test]

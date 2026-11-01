@@ -228,6 +228,9 @@ const MULK_CATEGORY: &str = "sakina.mulk";
 /// Mulk is once a night, so one stable identifier does what the per-prayer
 /// ones do for reminders: a repeat replaces the one already waiting.
 const MULK_IDENTIFIER: &str = "mulk";
+/// The summary a return to the Mac gets. One identifier, so a second return
+/// before the first was dealt with replaces it rather than stacking.
+const AWAY_IDENTIFIER: &str = "away";
 
 /// What the user did with a reminder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,6 +242,9 @@ pub enum Act {
     Recited,
     /// Clicked the notification itself, which should open the panel.
     Opened,
+    /// Clicked the summary of prayers that ended while the user was away,
+    /// which should open the panel on the month grid to log them.
+    OpenedLog,
 }
 
 type Handler = Box<dyn Fn(Act) + Send + Sync>;
@@ -296,6 +302,8 @@ define_class!(
                     if let Some(prayer) = prayer_from(&identifier) {
                         handler(Act::Prayed(prayer));
                     }
+                } else if identifier == AWAY_IDENTIFIER {
+                    handler(Act::OpenedLog);
                 } else {
                     // Any other identifier is the default action, which is
                     // the user clicking the notification body.
@@ -374,6 +382,37 @@ pub fn deliver_reminder(prayer: &str, title: &str, body: &str) -> Result<(), Str
 /// Posts a Surah Mulk reminder, with the Recited button on it.
 pub fn deliver_mulk_reminder(title: &str, body: &str) -> Result<(), String> {
     post(MULK_IDENTIFIER, title, body, Some(MULK_CATEGORY))
+}
+
+/// Says how many prayers ended while the user was away.
+///
+/// No button: there is no single prayer to mark, and a click opens the grid
+/// where each can be answered. Closing it is the whole of "not now" —
+/// nothing asks about these prayers again.
+pub fn deliver_away_summary(title: &str, body: &str) -> Result<(), String> {
+    post(AWAY_IDENTIFIER, title, body, None)
+}
+
+/// Takes back the reminders for these prayers, and the Surah Mulk one when
+/// asked, from Notification Center.
+///
+/// On a return, the questions left waiting about prayers whose time has
+/// since ended are stale, and the summary is what answers for them.
+pub fn withdraw_reminders(prayers: &[&str], mulk: bool) {
+    let mut identifiers: Vec<String> = prayers
+        .iter()
+        .map(|prayer| reminder_identifier(prayer))
+        .collect();
+    if mulk {
+        identifiers.push(MULK_IDENTIFIER.to_string());
+    }
+    let identifiers: Vec<_> = identifiers
+        .iter()
+        .map(|identifier| NSString::from_str(identifier))
+        .collect();
+    center().removeDeliveredNotificationsWithIdentifiers(&NSArray::from_retained_slice(
+        &identifiers,
+    ));
 }
 
 /// How long a start notice stays before Sakina takes it back.

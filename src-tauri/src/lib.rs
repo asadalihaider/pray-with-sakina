@@ -5,6 +5,7 @@ mod engine;
 mod notifier;
 mod icon;
 mod location;
+mod presence;
 mod scheduler;
 mod settings;
 mod stats;
@@ -692,6 +693,50 @@ fn announce_start(notice: &scheduler::StartNotice) {
 #[cfg(not(target_os = "macos"))]
 fn announce_start(_notice: &scheduler::StartNotice) {}
 
+/// Someone is back at the Mac after being away since `since`.
+///
+/// Clears the questions left waiting about prayers whose time has since
+/// ended, and says in one notification how many ended unlogged. The prayer
+/// still open is left alone: its reminder still applies, and its nudges
+/// carry on from here.
+#[cfg(target_os = "macos")]
+fn welcome_back(app: &AppHandle, since: chrono::DateTime<Utc>, now: chrono::DateTime<Utc>) {
+    let state = app.state::<AppState>();
+    let settings = state.settings.read().unwrap();
+
+    let open = today::display_date(now, &settings).ok().and_then(|date| {
+        let day = today::day_times_for(date, &settings).ok()?;
+        Prayer::ALL
+            .into_iter()
+            .find(|prayer| window_for(&day, *prayer).contains(now))
+    });
+    let stale: Vec<&str> = Prayer::ALL
+        .into_iter()
+        .filter(|prayer| Some(*prayer) != open)
+        .map(store::prayer_name)
+        .collect();
+    // Surah Mulk is asked about only during Isha's night.
+    notifier::withdraw_reminders(&stale, open != Some(Prayer::Isha));
+
+    let Ok(ended) = scheduler::ended_while_away(since, now, &settings, &state.log) else {
+        return;
+    };
+    if ended.is_empty() {
+        return;
+    }
+    let labels: Vec<&str> = ended
+        .iter()
+        .map(|(date, prayer)| today::label_for(*prayer, *date))
+        .collect();
+    let (title, body) = scheduler::away_summary(&labels);
+    if let Err(error) = notifier::deliver_away_summary(&title, &body) {
+        eprintln!("sakina: the summary of prayers to log could not be shown: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn welcome_back(_app: &AppHandle, _since: chrono::DateTime<Utc>, _now: chrono::DateTime<Utc>) {}
+
 /// Asks whether Surah Mulk has been recited tonight.
 #[cfg(target_os = "macos")]
 fn notify_mulk() {
@@ -891,6 +936,12 @@ fn remember_position(app: &AppHandle, window: &WebviewWindow) {
 }
 
 fn show_popover(app: &AppHandle) {
+    show_popover_on(app, None);
+}
+
+/// Opens the panel on a given tab rather than Today, for a notification
+/// that is about something else.
+fn show_popover_on(app: &AppHandle, tab: Option<&'static str>) {
     let Some(window) = popover(app) else {
         return;
     };
@@ -907,7 +958,7 @@ fn show_popover(app: &AppHandle) {
     let _ = window.set_focus();
     // Lets the web view replay its entrance animation on every open, not
     // just the first time it is created.
-    let _ = window.emit_to("main", "popover-shown", ());
+    let _ = window.emit_to("main", "popover-shown", tab);
 }
 
 fn toggle_popover(app: &AppHandle) {
@@ -1048,6 +1099,12 @@ pub fn run() {
                             let _ = app
                                 .run_on_main_thread(move || show_popover(&opener));
                         }
+                        notifier::Act::OpenedLog => {
+                            let opener = app.clone();
+                            let _ = app.run_on_main_thread(move || {
+                                show_popover_on(&opener, Some("stats"))
+                            });
+                        }
                     }
                 });
             }
@@ -1123,37 +1180,70 @@ pub fn run() {
                 let _ = handle.run_on_main_thread(move || show_popover(&opener));
             }
 
+            // A change in whether anyone is at the Mac wakes the loop early,
+            // so a return is answered as the screen unlocks, not up to a
+            // tick later.
+            let (wake, woken) = std::sync::mpsc::channel::<()>();
+            let waker = wake.clone();
+            presence::install(move || {
+                let _ = waker.send(());
+            });
+
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                refresh_tray_title(&handle);
+            std::thread::spawn(move || {
+                // Held so the channel never reads as closed, which would
+                // turn the wait below into a spin.
+                let _wake = wake;
+                let mut away_since = None;
+                loop {
+                    refresh_tray_title(&handle);
 
-                let state = handle.state::<AppState>();
-                let now = Utc::now();
-                // The opening first: a nudge never fires at the very start
-                // of a window, since the first one waits for its offset.
-                if let Ok(Some(notice)) =
-                    state
-                        .scheduler
-                        .poll_start(now, &state.settings.read().unwrap(), &state.log)
-                {
-                    announce_start(&notice);
-                }
-                if let Ok(Some(due)) =
-                    state
-                        .scheduler
-                        .poll(now, &state.settings.read().unwrap(), &state.log)
-                {
-                    notify(&handle, &due);
-                }
-                if let Ok(true) =
-                    state
-                        .scheduler
-                        .poll_mulk(now, &state.settings.read().unwrap(), &state.log)
-                {
-                    notify_mulk();
-                }
+                    let state = handle.state::<AppState>();
+                    let now = Utc::now();
+                    let away = presence::is_away();
+                    if away {
+                        away_since.get_or_insert(now);
+                    } else if let Some(since) = away_since.take() {
+                        welcome_back(&handle, since, now);
+                    }
 
-                std::thread::sleep(std::time::Duration::from_secs(TICK_SECONDS));
+                    // Polled while away too, and only the delivery skipped:
+                    // polling records what fell due, so a return does not
+                    // bring a backlog of reminders nobody was there for.
+                    //
+                    // The opening first: a nudge never fires at the very
+                    // start of a window, since the first one waits for its
+                    // offset.
+                    if let Ok(Some(notice)) =
+                        state
+                            .scheduler
+                            .poll_start(now, &state.settings.read().unwrap(), &state.log)
+                    {
+                        if !away {
+                            announce_start(&notice);
+                        }
+                    }
+                    if let Ok(Some(due)) =
+                        state
+                            .scheduler
+                            .poll(now, &state.settings.read().unwrap(), &state.log)
+                    {
+                        if !away {
+                            notify(&handle, &due);
+                        }
+                    }
+                    if let Ok(true) =
+                        state
+                            .scheduler
+                            .poll_mulk(now, &state.settings.read().unwrap(), &state.log)
+                    {
+                        if !away {
+                            notify_mulk();
+                        }
+                    }
+
+                    let _ = woken.recv_timeout(std::time::Duration::from_secs(TICK_SECONDS));
+                }
             });
 
             Ok(())
