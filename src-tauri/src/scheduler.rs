@@ -327,6 +327,10 @@ pub fn ended_while_away(
 /// The one notification a return gets: a title with the count, and a line
 /// naming the prayers when there are few enough to name.
 ///
+/// Kept to that one line. The Log now button says what to do, and macOS
+/// sets notification text tightly, so every extra sentence costs a cramped
+/// wrapped line.
+///
 /// "Not logged", never "missed": the user may well have prayed while the
 /// laptop was shut, and nothing counts as Qaza until they say so.
 pub fn away_summary(labels: &[&str]) -> (String, String) {
@@ -336,7 +340,7 @@ pub fn away_summary(labels: &[&str]) -> (String, String) {
     } else {
         format!("{count} prayers not logged")
     };
-    let named = match labels {
+    let body = match labels {
         [one] => format!("{one} ended while you were away."),
         [first, second] => format!("{first} and {second} ended while you were away."),
         [first, second, third] => {
@@ -344,8 +348,7 @@ pub fn away_summary(labels: &[&str]) -> (String, String) {
         }
         _ => "They ended while you were away.".to_string(),
     };
-    let ask = if count == 1 { "Click to log it." } else { "Click to log them." };
-    (title, format!("{named} {ask}"))
+    (title, body)
 }
 
 #[cfg(test)]
@@ -897,15 +900,15 @@ mod tests {
             away_summary(&["Zuhr"]),
             (
                 "1 prayer not logged".to_string(),
-                "Zuhr ended while you were away. Click to log it.".to_string()
+                "Zuhr ended while you were away.".to_string()
             )
         );
         assert_eq!(
             away_summary(&["Zuhr", "Asr", "Maghrib"]).1,
-            "Zuhr, Asr and Maghrib ended while you were away. Click to log them."
+            "Zuhr, Asr and Maghrib ended while you were away."
         );
         let (title, body) = away_summary(&["Fajr", "Zuhr", "Asr", "Maghrib", "Isha"]);
         assert_eq!(title, "5 prayers not logged");
-        assert_eq!(body, "They ended while you were away. Click to log them.");
+        assert_eq!(body, "They ended while you were away.");
     }
 }
