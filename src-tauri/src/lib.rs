@@ -1056,6 +1056,13 @@ pub fn run() {
             apply_autostart(&app.handle().clone(), launch_at_login);
 
             // A menu bar app, not a windowed one: no Dock icon, no app switcher.
+            //
+            // Info.plist says so too, with `LSUIElement`, and that is the part
+            // that holds. This call alone changes only the running process:
+            // macOS still read the bundle as an ordinary app, and clicking any
+            // of our notifications brought it forward as one — Dock icon and
+            // all, until it was quit. This stays for `tauri dev`, which runs
+            // the binary without the bundle and so without its Info.plist.
             #[cfg(target_os = "macos")]
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);

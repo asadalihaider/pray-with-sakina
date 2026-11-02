@@ -231,6 +231,9 @@ const MULK_IDENTIFIER: &str = "mulk";
 /// The summary a return to the Mac gets. One identifier, so a second return
 /// before the first was dealt with replaces it rather than stacking.
 const AWAY_IDENTIFIER: &str = "away";
+/// The button on the summary, and the category that carries it.
+const LOG_NOW_ACTION: &str = "sakina.log-now";
+const AWAY_CATEGORY: &str = "sakina.away";
 
 /// What the user did with a reminder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,8 +245,9 @@ pub enum Act {
     Recited,
     /// Clicked the notification itself, which should open the panel.
     Opened,
-    /// Clicked the summary of prayers that ended while the user was away,
-    /// which should open the panel on the month grid to log them.
+    /// Tapped Log now on the summary of prayers that ended while the user
+    /// was away, or clicked the summary itself. Either should open the panel
+    /// on the month grid to log them.
     OpenedLog,
 }
 
@@ -371,7 +375,22 @@ pub fn install(on_act: impl Fn(Act) + Send + Sync + 'static) {
             &NSArray::from_retained_slice(&[]),
             UNNotificationCategoryOptions::empty(),
         );
-    center().setNotificationCategories(&NSSet::from_retained_slice(&[category, mulk]));
+    // One button, not two. macOS shows only the first action as a button
+    // and folds the rest into an Options menu, and its own Close already
+    // says "later". Log now brings the app forward, since it opens the panel.
+    let log_now = UNNotificationAction::actionWithIdentifier_title_options(
+        &NSString::from_str(LOG_NOW_ACTION),
+        &NSString::from_str("Log now"),
+        UNNotificationActionOptions::Foreground,
+    );
+    let away =
+        UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(
+            &NSString::from_str(AWAY_CATEGORY),
+            &NSArray::from_retained_slice(&[log_now]),
+            &NSArray::from_retained_slice(&[]),
+            UNNotificationCategoryOptions::empty(),
+        );
+    center().setNotificationCategories(&NSSet::from_retained_slice(&[category, mulk, away]));
 }
 
 /// Posts a reminder for a prayer, with the button on it.
@@ -386,11 +405,12 @@ pub fn deliver_mulk_reminder(title: &str, body: &str) -> Result<(), String> {
 
 /// Says how many prayers ended while the user was away.
 ///
-/// No button: there is no single prayer to mark, and a click opens the grid
-/// where each can be answered. Closing it is the whole of "not now" —
-/// nothing asks about these prayers again.
+/// No Prayed button, since there is no single prayer to mark. Log now opens
+/// the grid where each can be answered, and so does a click on the summary
+/// itself. Closing it is the whole of "not now" — nothing asks about these
+/// prayers again.
 pub fn deliver_away_summary(title: &str, body: &str) -> Result<(), String> {
-    post(AWAY_IDENTIFIER, title, body, None)
+    post(AWAY_IDENTIFIER, title, body, Some(AWAY_CATEGORY))
 }
 
 /// Takes back the reminders for these prayers, and the Surah Mulk one when
